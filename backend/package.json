@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
-    "prestart": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules')) require('child_process').execFileSync('npm', ['ci'], {stdio:'inherit'});\" && node tests/validateModels.js",
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "validate:models": "node tests/validateModels.js",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",

@@ -284,90 +284,138 @@ Each member is responsible for the backend functionality, database integration, 
 
 Shared components will be coordinated to maintain consistent integration between modules.
 
-## 8.1 Getting Started — Backend (Phase I)
+## 8.1 Infrastructure
 
-**Prerequisites:** Node.js and npm installed, a terminal, and a local copy of this repository. Run commands from the repository root unless stated otherwise.
+The Phase II development environment uses Docker Compose with four services:
+
+- `nginx`: Reverse proxy for API requests.
+- `backend`: Node.js and Express API.
+- `mongodb`: MongoDB 7 with persistent storage.
+- `mongo-init`: Initializes the single-node MongoDB replica set.
+
+The React frontend is not part of the Phase II Docker environment.
+
+## 8.2 Setup
+
+From the project root:
+
+```bash
+cp .env.example .env
+```
+
+On Windows, use PowerShell for the `cp` command or use `Copy-Item`.
+
+Replace `JWT_SECRET` with a strong local secret.
+
+Start the application:
+
+```bash
+docker compose up --build -d
+```
+
+Verify:
+
+```bash
+docker compose ps -a
+curl http://localhost:8080/api/v1/health
+```
+
+API base URL:
+
+`http://localhost:8080/api/v1`
+
+## 8.3 MongoDB
+
+Database: `finmarket_enterprise`
+
+Internal connection:
+
+`mongodb://mongodb:27017/finmarket_enterprise?replicaSet=rs0`
+
+For MongoDB Compass on the host machine:
+
+`mongodb://localhost:27017/?directConnection=true`
+
+The Compass connection is limited to the local machine through the loopback port binding. MongoDB authentication is not configured for this local development environment.
+
+## 8.4 Database Ownership
+
+- Member 1: `users`, `advisorProfiles`, `advisorSpecialistAssignments`
+- Member 2: `leads`
+- Member 3: `campaigns`, `templates`
+- Member 4: `deliveryJobs`
+- Member 5: `automationRules`, `activityEvents`
+
+Each module must implement its own Mongoose models, repositories, validation, and persistence tests using the shared Mongoose connection.
+
+## 8.5 Identifier Conventions
+
+- `userId`: `User._id`
+- `advisorId`: `AdvisorProfile._id`
+- `specialistUserId`: `User._id`
+- `ownerId`: `User._id` where specified
+- `campaignId`: `Campaign._id`
+- `leadId`: `Lead._id`
+- `templateId`: `Template._id`
+- `deliveryJobId`: `DeliveryJob._id`
+- `automationRuleId`: `AutomationRule._id`
+
+Mongoose references alone do not enforce the existence of related records. Backend services must validate references and ownership.
+
+## 8.6 Security Integration
+
+Member 1 will implement shared JWT Bearer authentication and authorization.
+
+Planned shared interfaces:
+
+- `authenticate`
+- `authorizeRoles`
+- `requireActiveUser`
+
+The authenticated request context will provide `userId`, `role`, and `advisorId` when applicable.
+
+Other members may use test fixtures or mock authentication contexts for independent development until the shared middleware is available.
+
+JWT and authorization functionality must not be represented as completed at the infrastructure stage.
+
+## 8.7 Development Responsibilities
+
+Shared infrastructure configuration is maintained by Member 1.
+
+Other members should avoid modifying Docker Compose, shared database configuration, or global route registration without coordination.
+
+Feature-specific implementations belong in the assigned modules.
+
+## 8.8 Validation
+
+Run model validation separately:
 
 ```bash
 cd backend
+npm run validate:models
+```
+
+Backend startup uses:
+
+```bash
 npm start
 ```
 
-When `npm start` is executed, the `prestart` script automatically:
+## 8.9 Shutdown
 
-1. Checks whether backend dependencies are installed and installs them if necessary.
-2. Executes `tests/validateModels.js` to validate all eight initial Mongoose models.
-3. Starts the Express server only if all model validations pass.
-
-The validation script uses Mongoose schema validation without requiring a MongoDB connection. If any model fails validation, the startup process stops and displays the corresponding error.
-
-Expected validation result:
-
-```text
-Validation completed: 8/8 passed
-```
-
-This ensures that the initial data models meet their schema requirements before the backend starts.
-
-`npm start` runs `node src/server.js`. The `prestart` script attempts `npm ci` automatically **only if `backend/node_modules` is absent**. On a fresh clone, or whenever dependencies are missing/outdated, the most reliable setup is:
+Stop containers while retaining MongoDB data:
 
 ```bash
-cd backend
-npm ci
-npm start
+docker compose down
 ```
 
-For development with automatic restarts, run `npm run dev` (install dependencies first). Default address: `http://localhost:3001`. Check the server using:
+Rebuild:
 
 ```bash
-curl http://localhost:3001/api/v1/health
+docker compose up --build -d
 ```
 
-Expected: HTTP 200 and JSON with `success: true` and `data.status: "OK"`. Stop the server with `Ctrl+C`. Use a current Node.js release compatible with the versions of Express and Mongoose recorded in `backend/package-lock.json`.
-
-### Environment configuration
-
-The backend reads environment variables in `backend/src/config.js`; Phase I does **not** require a MongoDB connection, JWT token, Gmail credentials, or Meta credentials. Variables are read from the process environment; the code does not automatically load a `.env` file with `dotenv`.
-
-| Variable | Default / purpose | Phase I required? |
-|---|---|---|
-| `PORT` | `3001` — HTTP port | No |
-| `NODE_ENV` | `development` — application environment | No |
-| `CORS_ORIGIN` | Configured allowed frontend origin; can be overridden when the frontend is implemented | No |
-| `MONGO_URI` | Unset — reserved for MongoDB integration. If supplied, the server attempts to connect. | **No — leave unset** |
-| `JWT_SECRET` | Unset — intended for Phase II JWT support | No |
-| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Unset — planned email integration | No |
-| `META_ACCESS_TOKEN`, `META_PAGE_ID` | Unset — planned authorized Facebook Page integration | No |
-
-Example macOS/Linux overrides:
-
-```bash
-cd backend
-PORT=3002 npm start
-```
-
-Do not commit passwords, tokens, or live third-party credentials. In-memory data is cleared each time the backend process restarts. Although the project defines eight Mongoose schemas, the Phase I repositories do not persist application records to MongoDB.
-
-### Frontend (Phase III)
-
-The React frontend and its integration with the backend are planned for Phase III. **No frontend development server or frontend startup command is required to run or test the Phase I backend.** Start the backend with `cd backend` followed by `npm start` and use the API endpoints or Postman for Phase I verification.
-
-### Testing
-
-From `backend/`, run:
-
-```bash
-npm test
-```
-
-The latest reported run (October 15, 2026) passed **55/55 Node.js automated tests**. Coverage includes Identity, Leads, Campaigns, Delivery, Automation, and cross-module integration. Node's built-in `node:test` runner is used; tests do not require MongoDB.
-
-A consolidated Postman Collection v2.1 contains **157 requests** across setup, all five modules, integration/regression, validation, and diagnostic folders. On the latest observed run of the original collection, **601/603 assertions passed**; the remaining two reflected one Delivery ownership error-contract mismatch. The corrected collection expects `400 ADVISOR_MISMATCH` rather than `404 CAMPAIGN_NOT_FOUND` for that scenario, but its corrected rerun has **not** been confirmed here. Import `FinMarket-Enterprise_Complete_Phase1_Corrected.postman_collection.json` into Postman after adding that generated file to your project; this file is **not included in the inspected ZIP**. Set `baseUrl` to `http://localhost:3001/api/v1`, start the backend, use 1 iteration, and run the collection sequentially. Rebooting the backend before a complete run clears test data.
-
-**Known quality note:** Mongoose 9 prints a deprecation warning for `Document.prototype.validateSync()`; it does not currently fail the test suite. Migration to asynchronous `validate()` will require changes to callers.
-
-**Current implementation status:** Phase I backend routes, schema validation, in-memory records, mock email/social delivery, and simulated automation events are implemented. JWT authorization, database persistence, real external delivery, complete frontend integration, and production deployment remain Phase II/III goals.
-
+Do not use `docker compose down -v` unless permanent deletion of the MongoDB volume is intended.
 ## 9. Project Scope and Limitations
 
 FinMarket-Enterprise is an educational project intended to demonstrate full-stack web development, marketing automation, database management, security, and third-party API integration.
