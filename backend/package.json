@@ -1,21 +1,30 @@
 {
-  "name": "backend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "finmarket-enterprise-backend",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "test": "node --test tests/identity/identityPhaseII.test.js",
+    "test:identity": "node --test tests/identity/*.test.js",
+    "test:leads": "node --test tests/leads/*.test.js",
+    "test:campaigns": "node --test tests/campaigns/*.test.js",
+    "test:delivery": "node --test tests/delivery/*.test.js",
+    "test:automation": "node --test tests/automation/*.test.js",
+    "test:integration": "node --test tests/integration/*.test.js",
+    "test:all": "node --test --test-concurrency=1",
     "validate:models": "node tests/validateModels.js",
-    "test": "node --test"
+    "admin:provision": "node scripts/provisionAdmin.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.3.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.1"
   }
 }
