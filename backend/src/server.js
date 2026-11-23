@@ -2,6 +2,9 @@ import mongoose from "mongoose";
 import app from "./app.js";
 import config from "./config.js";
 import connectDatabase from "./config/database.js";
+import initializeAutomation, {
+    stopAutomationWorker
+} from "./modules/automation/initializeAutomation.js";
 
 if (!Number.isInteger(config.PORT) || config.PORT < 1 || config.PORT > 65535) {
     throw new Error("Invalid server port.");
@@ -11,6 +14,8 @@ let server;
 
 async function shutdown(signal) {
     console.log(`${signal} received. Shutting down...`);
+
+    stopAutomationWorker();
 
     if (server) {
         await new Promise((resolve) => server.close(resolve));
@@ -22,6 +27,7 @@ async function shutdown(signal) {
 
 try {
     await connectDatabase(config.MONGO_URI);
+    await initializeAutomation();
 
     server = app.listen(config.PORT, () => {
         console.log(`FinMarket-Enterprise backend running on port ${config.PORT}`);
