@@ -1,0 +1,3672 @@
+{
+  "info": {
+    "_postman_id": "ed90a75d-e306-44f6-8645-630ae5665097",
+    "name": "FinMarket-Enterprise | Phase II Automation & Analytics (M5)",
+    "description": "Phase II Automation & Analytics (Member 5). Run the folders in order with the Collection Runner (sequential).\n\nBEFORE RUNNING set these collection variables (they come from the Identity, Leads and Campaigns modules):\n- advisorToken / advisorUserId - JWT and User _id of advisor A\n- otherAdvisorToken / otherAdvisorUserId - JWT and User _id of advisor B\n- specialistToken - a marketing specialist with an ACCEPTED relationship to advisor A AND assigned to campaignId\n- strangerSpecialistToken - a specialist with no relationship to advisor A\n- adminToken - an administrator\n- campaignId - an ACTIVE campaign owned by advisor A and assigned to the specialist\n- otherAdvisorCampaignId - a campaign owned by advisor B\n- badToken stays a made-up string.\nTokens are never stored in this file. The collection is safe to run repeatedly (runTag keeps ids unique). No real email is sent: simulated events never reach Delivery.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 \u2014 Setup",
+      "description": "Sets runTag so IDs are unique on every run. Tokens and IDs must be set as collection variables first (see collection description).",
+      "item": [
+        {
+          "name": "Initialise run",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"runTag\", Date.now().toString(36));",
+                  "pm.test(\"Advisor token works\", () => pm.expect(pm.response.json().success).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 \u2014 Authentication",
+      "description": "8.2: missing, malformed, wrong and tampered tokens.",
+      "item": [
+        {
+          "name": "No token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{badToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create without token -> 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulate without token -> 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Events without token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Executions without token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/automations/executions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "executions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Analytics without token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 \u2014 Rules (advisor)",
+      "description": "8.1 / 8.3: creation, retrieval, update and validation.",
+      "item": [
+        {
+          "name": "Create rule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Owned by the token user\", () => pm.expect(d.ownerId).to.eql(pm.collectionVariables.get(\"advisorUserId\")));",
+                  "pm.test(\"Phase I fields kept\", () => [\"_id\",\"ownerId\",\"name\",\"trigger\",\"action\",\"delayMinutes\",\"enabled\"].forEach(k => pm.expect(d).to.have.property(k)));",
+                  "pm.collectionVariables.set(\"ruleId\", d._id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create campaign email rule (scheduled follow-up)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Follow up {{runTag}}\",\n  \"trigger\": \"CONSULTATION_REQUESTED\",\n  \"action\": \"SCHEDULE_FOLLOW_UP\",\n  \"delayMinutes\": 60,\n  \"enabled\": true,\n  \"campaignId\": \"{{campaignId}}\",\n  \"actionConfig\": {\n    \"subject\": \"Checking in\",\n    \"body\": \"Thanks for your interest.\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"followUpRuleId\", pm.response.json().data._id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create rule allowing specialist toggle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Toggleable {{runTag}}\",\n  \"trigger\": \"CAMPAIGN_ACTIVATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": false,\n  \"campaignId\": \"{{campaignId}}\",\n  \"allowSpecialistToggle\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"toggleRuleId\", pm.response.json().data._id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get rule by id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Same rule\", () => pm.expect(pm.response.json().data._id).to.eql(pm.collectionVariables.get(\"ruleId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List rules (paginated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?limit=5&page=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Phase I list shape plus pagination\", () => { pm.expect(b.count).to.be.a(\"number\"); pm.expect(b.data).to.be.an(\"array\"); pm.expect(b.pagination).to.have.keys(\"page\",\"limit\",\"total\",\"totalPages\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter rules (enabled + trigger)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?enabled=true&trigger=LEAD_CREATED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "enabled",
+                  "value": "true"
+                },
+                {
+                  "key": "trigger",
+                  "value": "LEAD_CREATED"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Filtered\", () => pm.response.json().data.forEach(r => { pm.expect(r.enabled).to.eql(true); pm.expect(r.trigger).to.eql(\"LEAD_CREATED\"); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update rule (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed {{runTag}}\",\n  \"delayMinutes\": 15\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Updated\", () => pm.expect(pm.response.json().data.delayMinutes).to.eql(15));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Disable then re-enable (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Disabled\", () => pm.expect(pm.response.json().data.enabled).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Re-enable rule",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing required fields -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid trigger -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"NOPE\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid action -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"DELETE_ALL\",\n  \"delayMinutes\": 0,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid delay -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": -1,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-integer delay -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 1.5,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid campaign id -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true,\n  \"campaignId\": \"{{badId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown campaign -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true,\n  \"campaignId\": \"{{missingId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code CAMPAIGN_NOT_FOUND\", () => pm.expect(b.error.code).to.eql(\"CAMPAIGN_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Another advisor's campaign -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true,\n  \"campaignId\": \"{{otherAdvisorCampaignId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code CAMPAIGN_ACCESS_DENIED\", () => pm.expect(b.error.code).to.eql(\"CAMPAIGN_ACCESS_DENIED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unsafe trigger/action pair -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"DELIVERY_QUEUED\",\n  \"action\": \"SEND_EMAIL\",\n  \"delayMinutes\": 0,\n  \"enabled\": true,\n  \"campaignId\": \"{{campaignId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mass assignment (lastExecutedAt) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true,\n  \"lastExecutedAt\": \"2020-01-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner spoofing -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true,\n  \"ownerId\": \"{{otherAdvisorUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code OWNER_MISMATCH\", () => pm.expect(b.error.code).to.eql(\"OWNER_MISMATCH\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH cannot change owner -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerId\": \"{{otherAdvisorUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Empty PATCH -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown rule -> 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{missingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{missingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed rule id -> 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{badId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{badId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid list filter -> 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?enabled=maybe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "enabled",
+                  "value": "maybe"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 \u2014 Ownership and roles",
+      "description": "8.2: ownership checks, specialist access (accepted relationship AND campaign assignment) and read-only admin.",
+      "item": [
+        {
+          "name": "Other advisor cannot read the rule -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Other advisor cannot modify the rule -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Hijack\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Other advisor's list excludes my rules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"No foreign rules\", () => pm.response.json().data.forEach(r => pm.expect(r._id).to.not.eql(pm.collectionVariables.get(\"ruleId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Other advisor cannot filter by my owner id -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?ownerId={{advisorUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "ownerId",
+                  "value": "{{advisorUserId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist cannot create rules -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome notification {{runTag}}\",\n  \"trigger\": \"LEAD_CREATED\",\n  \"action\": \"CREATE_NOTIFICATION\",\n  \"delayMinutes\": 0,\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assigned specialist sees campaign rules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Only campaign rules\", () => pm.response.json().data.forEach(r => pm.expect(r.campaignId).to.eql(pm.collectionVariables.get(\"campaignId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist cannot read a private (no campaign) rule -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist cannot edit without permission -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{followUpRuleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{followUpRuleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist may toggle when the owner allowed it",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{toggleRuleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{toggleRuleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist cannot change anything else -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{toggleRuleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{toggleRuleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unrelated specialist sees nothing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{strangerSpecialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Empty\", () => pm.expect(pm.response.json().data).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unrelated specialist cannot read a rule -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{strangerSpecialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{toggleRuleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{toggleRuleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin can read all rules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin cannot modify rules -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/{{ruleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "{{ruleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin cannot simulate events -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 \u2014 Events and processing",
+      "description": "8.4: simulation, matching and event history.",
+      "item": [
+        {
+          "name": "Simulate LEAD_CREATED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt_{{runTag}}_1\",\n  \"eventType\": \"LEAD_CREATED\",\n  \"metadata\": {\n    \"source\": \"postman\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Phase I keys\", () => { pm.expect(d).to.have.keys(\"event\",\"simulatedActions\"); });",
+                  "pm.test(\"Persisted + processed\", () => { pm.expect(d.event.processingStatus).to.eql(\"PROCESSED\"); pm.expect(d.event.source).to.eql(\"SIMULATION\"); });",
+                  "pm.test(\"Matched the enabled rule\", () => pm.expect(d.simulatedActions.map(a => a.ruleId)).to.include(pm.collectionVariables.get(\"ruleId\")));",
+                  "pm.test(\"Simulated, never sent\", () => d.simulatedActions.forEach(a => pm.expect(a.status).to.eql(\"SIMULATED\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulate with no body (Phase I sample)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Sample lead event\", () => pm.expect(pm.response.json().data.event.eventType).to.eql(\"LEAD_CREATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulate an unmatched event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt_{{runTag}}_nomatch\",\n  \"eventType\": \"LEAD_STATUS_CHANGED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"No actions\", () => pm.expect(pm.response.json().data.simulatedActions).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulate campaign event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt_{{runTag}}_campaign\",\n  \"eventType\": \"CAMPAIGN_ACTIVATED\",\n  \"entityId\": \"{{campaignId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid event type -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"BOGUS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Audit event type cannot be simulated -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"AUTOMATION_EXECUTED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entity type mismatch -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\",\n  \"entityType\": \"CAMPAIGN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid entity id -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\",\n  \"entityId\": \"{{badId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Event for another advisor's campaign -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"CAMPAIGN_ACTIVATED\",\n  \"entityId\": \"{{otherAdvisorCampaignId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner mismatch -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\",\n  \"ownerId\": \"{{otherAdvisorUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code OWNER_MISMATCH\", () => pm.expect(b.error.code).to.eql(\"OWNER_MISMATCH\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sensitive metadata (password) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\",\n  \"metadata\": {\n    \"password\": \"secret\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code METADATA_NOT_ALLOWED\", () => pm.expect(b.error.code).to.eql(\"METADATA_NOT_ALLOWED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sensitive metadata (email) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\",\n  \"metadata\": {\n    \"note\": \"reach me at someone@example.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code METADATA_NOT_ALLOWED\", () => pm.expect(b.error.code).to.eql(\"METADATA_NOT_ALLOWED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Client-supplied processing fields -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\",\n  \"processingStatus\": \"PROCESSED\",\n  \"source\": \"INTERNAL\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist cannot simulate -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"LEAD_CREATED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Event history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Contains the simulated event\", () => pm.expect(pm.response.json().data.map(e => e.eventId)).to.include(\"evt_\" + pm.collectionVariables.get(\"runTag\") + \"_1\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter events by type",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?eventType=LEAD_CREATED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "eventType",
+                  "value": "LEAD_CREATED"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Filtered\", () => pm.response.json().data.forEach(e => pm.expect(e.eventType).to.eql(\"LEAD_CREATED\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter events by date range",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2020-01-01T00:00:00.000Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2100-01-01T00:00:00.000Z"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter events by processing status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?processingStatus=PROCESSED&source=SIMULATION",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "processingStatus",
+                  "value": "PROCESSED"
+                },
+                {
+                  "key": "source",
+                  "value": "SIMULATION"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid date range -> 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?from=2030-01-01T00:00:00.000Z&to=2020-01-01T00:00:00.000Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2030-01-01T00:00:00.000Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2020-01-01T00:00:00.000Z"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid event filter -> 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?eventType=UNKNOWN",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "eventType",
+                  "value": "UNKNOWN"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist sees only campaign events",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Only the assigned campaign\", () => pm.response.json().data.forEach(e => pm.expect(e.campaignId).to.eql(pm.collectionVariables.get(\"campaignId\"))));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 \u2014 Duplicates",
+      "description": "8.5: the same eventId is never processed twice.",
+      "item": [
+        {
+          "name": "First submission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt_{{runTag}}_dup\",\n  \"eventType\": \"LEAD_CREATED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeat -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt_{{runTag}}_dup\",\n  \"eventType\": \"LEAD_CREATED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code EVENT_ALREADY_PROCESSED\", () => pm.expect(b.error.code).to.eql(\"EVENT_ALREADY_PROCESSED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeat again -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/simulate-event",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "simulate-event"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt_{{runTag}}_dup\",\n  \"eventType\": \"LEAD_CREATED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });",
+                  "pm.test(\"Error code EVENT_ALREADY_PROCESSED\", () => pm.expect(b.error.code).to.eql(\"EVENT_ALREADY_PROCESSED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Only one stored",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/events?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "const id = \"evt_\" + pm.collectionVariables.get(\"runTag\") + \"_dup\";",
+                  "pm.test(\"Exactly one\", () => pm.expect(pm.response.json().data.filter(e => e.eventId === id).length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 \u2014 Executions and scheduling",
+      "description": "8.6: persisted executions and follow-up schedule. Real (non-simulated) execution is driven by the other modules and the background worker; these requests inspect the results.",
+      "item": [
+        {
+          "name": "List executions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/executions?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "executions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Shape\", () => { const b = pm.response.json(); pm.expect(b.data).to.be.an(\"array\"); pm.expect(b.pagination).to.be.an(\"object\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulated executions never show as COMPLETED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/executions?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "executions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Simulated stay SIMULATED\", () => pm.response.json().data.filter(x => x.simulated).forEach(x => pm.expect(x.status).to.eql(\"SIMULATED\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Other advisor sees none of mine",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/executions?limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "executions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Own only\", () => pm.response.json().data.forEach(x => pm.expect(x.ownerId).to.not.eql(pm.collectionVariables.get(\"advisorUserId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid executions filter -> 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/automations/executions?page=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "automations",
+                "executions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"Structured error\", () => { pm.expect(b.success).to.eql(false); pm.expect(b.error.message).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 \u2014 Analytics",
+      "description": "8.7: aggregation-backed summary, scoped by role.",
+      "item": [
+        {
+          "name": "Advisor summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{advisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Sections present\", () => pm.expect(d).to.include.keys(\"scope\",\"rules\",\"events\",\"simulatedActions\",\"executedActions\",\"business\",\"generatedAt\"));",
+                  "pm.test(\"Own scope\", () => pm.expect(d.scope.level).to.eql(\"OWN_RESOURCES\"));",
+                  "pm.test(\"Counts add up\", () => pm.expect(d.rules.total).to.eql(d.rules.enabled + d.rules.disabled));",
+                  "pm.test(\"Conversion rate valid\", () => pm.expect(d.business.leads.conversionRate).to.be.within(0, 100));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Other advisor summary is independent",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Own scope\", () => pm.expect(pm.response.json().data.scope.level).to.eql(\"OWN_RESOURCES\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Specialist summary: no lead data",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{specialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Campaign scope\", () => pm.expect(d.scope.level).to.eql(\"ASSIGNED_CAMPAIGNS\"));",
+                  "pm.test(\"Leads hidden\", () => pm.expect(d.business.leads).to.eql(null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unrelated specialist summary is empty",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{strangerSpecialistToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Empty\", () => pm.expect(pm.response.json().data.rules.total).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin summary: platform",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Platform scope\", () => pm.expect(pm.response.json().data.scope.level).to.eql(\"PLATFORM\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Query params cannot widen scope",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{otherAdvisorToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary?ownerId={{advisorUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "ownerId",
+                  "value": "{{advisorUserId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Still own scope\", () => pm.expect(pm.response.json().data.scope.level).to.eql(\"OWN_RESOURCES\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001/api/v1"
+    },
+    {
+      "key": "runTag",
+      "value": ""
+    },
+    {
+      "key": "advisorToken",
+      "value": ""
+    },
+    {
+      "key": "advisorUserId",
+      "value": ""
+    },
+    {
+      "key": "otherAdvisorToken",
+      "value": ""
+    },
+    {
+      "key": "otherAdvisorUserId",
+      "value": ""
+    },
+    {
+      "key": "specialistToken",
+      "value": ""
+    },
+    {
+      "key": "strangerSpecialistToken",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "badToken",
+      "value": "not.a.jwt"
+    },
+    {
+      "key": "campaignId",
+      "value": ""
+    },
+    {
+      "key": "otherAdvisorCampaignId",
+      "value": ""
+    },
+    {
+      "key": "ruleId",
+      "value": ""
+    },
+    {
+      "key": "followUpRuleId",
+      "value": ""
+    },
+    {
+      "key": "toggleRuleId",
+      "value": ""
+    },
+    {
+      "key": "badId",
+      "value": "not-an-object-id"
+    },
+    {
+      "key": "missingId",
+      "value": "507f1f77bcf86cd799439011"
+    }
+  ]
+}

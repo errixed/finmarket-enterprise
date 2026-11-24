@@ -1,8 +1,21 @@
 import { Router } from "express";
-import * as automationController from "./automationController.js";
+import createAutomationService from "./automationService.js";
+import createAutomationController from "./automationController.js";
+import { resolveAuthenticate } from "./automationAuth.js";
 
-const router = Router();
+// Mounted in routes/index.js under /api/v1/analytics.
+export function createAnalyticsRouter({
+    service = createAutomationService(),
+    authenticate = resolveAuthenticate()
+} = {}) {
+    const router = Router();
+    const controller = createAutomationController(service);
 
-router.get("/summary", automationController.getAnalyticsSummary);
+    router.use(authenticate);
 
-export default router;
+    router.get("/summary", controller.getAnalyticsSummary);
+
+    return router;
+}
+
+export default createAnalyticsRouter();

@@ -1,9 +1,11 @@
 import mongoose from "mongoose";
-
 import app from "./app.js";
 import config, { validateConfiguration } from "./config.js";
 import connectDatabase from "./config/database.js";
 import initializeIdentityModels from "./config/initialize-identity-models.js";
+import initializeAutomation, {
+    stopAutomationWorker
+} from "./modules/automation/initializeAutomation.js";
 
 let server;
 let shuttingDown = false;
@@ -23,6 +25,8 @@ async function shutdown(signal) {
     forceExit.unref();
 
     try {
+        await stopAutomationWorker();
+
         if (server) {
             await new Promise((resolve, reject) => {
                 server.close(error => {
@@ -48,6 +52,8 @@ try {
     await connectDatabase(config.MONGO_URI);
 
     await initializeIdentityModels();
+
+    await initializeAutomation();
 
     server = app.listen(config.PORT, () => {
         console.log(
