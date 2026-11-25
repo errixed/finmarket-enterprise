@@ -1,31 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import app from "../../src/app.js";
+import { usePhase2Database } from "../helpers/phase2Database.js";
 
+usePhase2Database();
 const server = app.listen(0);
 
 const PORT = server.address().port;
 const BASE_URL = `http://localhost:${PORT}/api/v1`;
 
 test.after(() => {
-    server.close();
+  server.close();
 });
 
 async function request(method, endpoint, body) {
-    const response = await fetch(`${BASE_URL}${endpoint}`, {
-        method,
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: body === undefined
-            ? undefined
-            : JSON.stringify(body)
-    });
+  const response = await fetch(`${BASE_URL}${endpoint}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 
-    return {
-        status: response.status,
-        body: await response.json()
-    };
+  return {
+    status: response.status,
+    body: await response.json(),
+  };
 }
 
 const email = `advisor-${Date.now()}@example.com`;
@@ -33,193 +33,151 @@ const email = `advisor-${Date.now()}@example.com`;
 let advisorId;
 
 test("Health endpoint returns 200", async () => {
-    const result = await request("GET", "/health");
+  const result = await request("GET", "/health");
 
-    assert.equal(result.status, 200);
-    assert.equal(result.body.success, true);
-    assert.equal(result.body.data.status, "OK");
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
+  assert.equal(result.body.data.status, "OK");
 });
 
 test("Register advisor successfully", async () => {
-    const result = await request("POST", "/auth/register", {
-        name: "John Smith",
-        email,
-        password: "password123",
-        role: "ADVISOR",
-        profile: {
-            specialties: ["Retirement Planning"],
-            consultationTypes: ["ONLINE"],
-            bio: "Financial advisor",
-            isPublic: true
-        }
-    });
+  const result = await request("POST", "/auth/register", {
+    name: "John Smith",
+    email,
+    password: "password123",
+    role: "ADVISOR",
+    profile: {
+      specialties: ["Retirement Planning"],
+      consultationTypes: ["ONLINE"],
+      bio: "Financial advisor",
+      isPublic: true,
+    },
+  });
 
-    assert.equal(result.status, 201);
-    assert.equal(result.body.success, true);
-    assert.equal(result.body.data.user.role, "ADVISOR");
+  assert.equal(result.status, 201);
+  assert.equal(result.body.success, true);
+  assert.equal(result.body.data.user.role, "ADVISOR");
 
-    advisorId = result.body.data.advisorProfile.id;
+  advisorId = result.body.data.advisorProfile.id;
 
-    assert.ok(advisorId);
-    assert.match(advisorId, /^[a-f0-9]{24}$/i);
+  assert.ok(advisorId);
+  assert.match(advisorId, /^[a-f0-9]{24}$/i);
 
-    assert.equal(
-        result.body.data.user.passwordHash,
-        undefined
-    );
+  assert.equal(result.body.data.user.passwordHash, undefined);
 });
 
 test("Reject duplicate email registration", async () => {
-    const result = await request("POST", "/auth/register", {
-        name: "Another User",
-        email,
-        password: "password123",
-        role: "ADVISOR"
-    });
+  const result = await request("POST", "/auth/register", {
+    name: "Another User",
+    email,
+    password: "password123",
+    role: "ADVISOR",
+  });
 
-    assert.equal(result.status, 409);
-    assert.equal(result.body.success, false);
+  assert.equal(result.status, 409);
+  assert.equal(result.body.success, false);
 });
 
 test("Reject invalid email", async () => {
-    const result = await request("POST", "/auth/register", {
-        name: "Invalid User",
-        email: "invalid-email",
-        password: "password123",
-        role: "ADVISOR"
-    });
+  const result = await request("POST", "/auth/register", {
+    name: "Invalid User",
+    email: "invalid-email",
+    password: "password123",
+    role: "ADVISOR",
+  });
 
-    assert.equal(result.status, 400);
+  assert.equal(result.status, 400);
 });
 
 test("Login with correct credentials", async () => {
-    const result = await request("POST", "/auth/login", {
-        email,
-        password: "password123"
-    });
+  const result = await request("POST", "/auth/login", {
+    email,
+    password: "password123",
+  });
 
-    assert.equal(result.status, 200);
-    assert.equal(result.body.success, true);
-    assert.equal(
-        result.body.data.authentication,
-        "PHASE_I_DEMO_NO_TOKEN"
-    );
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
+  assert.equal(result.body.data.authentication, "PHASE_I_DEMO_NO_TOKEN");
 });
 
 test("Reject incorrect password", async () => {
-    const result = await request("POST", "/auth/login", {
-        email,
-        password: "wrongpassword"
-    });
+  const result = await request("POST", "/auth/login", {
+    email,
+    password: "wrongpassword",
+  });
 
-    assert.equal(result.status, 401);
+  assert.equal(result.status, 401);
 });
 
 test("List public advisors", async () => {
-    const result = await request("GET", "/advisors");
+  const result = await request("GET", "/advisors");
 
-    assert.equal(result.status, 200);
-    assert.ok(Array.isArray(result.body.data));
+  assert.equal(result.status, 200);
+  assert.ok(Array.isArray(result.body.data));
 
-    const advisor = result.body.data.find(
-        item => item.id === advisorId
-    );
+  const advisor = result.body.data.find((item) => item.id === advisorId);
 
-    assert.ok(advisor);
-    assert.equal(advisor.name, "John Smith");
+  assert.ok(advisor);
+  assert.equal(advisor.name, "John Smith");
 });
 
 test("Get advisor by ID", async () => {
-    const result = await request(
-        "GET",
-        `/advisors/${advisorId}`
-    );
+  const result = await request("GET", `/advisors/${advisorId}`);
 
-    assert.equal(result.status, 200);
-    assert.equal(result.body.data.id, advisorId);
-    assert.equal(result.body.data.name, "John Smith");
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.id, advisorId);
+  assert.equal(result.body.data.name, "John Smith");
 });
 
 test("Update advisor profile", async () => {
-    const result = await request(
-        "PATCH",
-        `/advisors/${advisorId}`,
-        {
-            specialties: [
-                "Investment Planning",
-                "Retirement Planning"
-            ],
-            consultationTypes: ["ONLINE", "PHONE"],
-            bio: "Updated financial advisor biography."
-        }
-    );
+  const result = await request("PATCH", `/advisors/${advisorId}`, {
+    specialties: ["Investment Planning", "Retirement Planning"],
+    consultationTypes: ["ONLINE", "PHONE"],
+    bio: "Updated financial advisor biography.",
+  });
 
-    assert.equal(result.status, 200);
-    assert.equal(result.body.success, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
 
-    assert.deepEqual(
-        result.body.data.specialties,
-        ["Investment Planning", "Retirement Planning"]
-    );
+  assert.deepEqual(result.body.data.specialties, [
+    "Investment Planning",
+    "Retirement Planning",
+  ]);
 
-    assert.equal(
-        result.body.data.bio,
-        "Updated financial advisor biography."
-    );
+  assert.equal(result.body.data.bio, "Updated financial advisor biography.");
 });
 
 test("Retrieve updated advisor profile", async () => {
-    const result = await request(
-        "GET",
-        `/advisors/${advisorId}`
-    );
+  const result = await request("GET", `/advisors/${advisorId}`);
 
-    assert.equal(result.status, 200);
-    assert.equal(
-        result.body.data.bio,
-        "Updated financial advisor biography."
-    );
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.bio, "Updated financial advisor biography.");
 });
 
 test("Reject invalid consultation type", async () => {
-    const result = await request(
-        "PATCH",
-        `/advisors/${advisorId}`,
-        {
-            consultationTypes: ["VIDEO_CALL"]
-        }
-    );
+  const result = await request("PATCH", `/advisors/${advisorId}`, {
+    consultationTypes: ["VIDEO_CALL"],
+  });
 
-    assert.equal(result.status, 400);
+  assert.equal(result.status, 400);
 });
 
 test("Reject modification of advisor ID", async () => {
-    const result = await request(
-        "PATCH",
-        `/advisors/${advisorId}`,
-        {
-            userId: "unauthorized-change"
-        }
-    );
+  const result = await request("PATCH", `/advisors/${advisorId}`, {
+    userId: "unauthorized-change",
+  });
 
-    assert.equal(result.status, 400);
+  assert.equal(result.status, 400);
 });
 
 test("Reject empty update request", async () => {
-    const result = await request(
-        "PATCH",
-        `/advisors/${advisorId}`,
-        {}
-    );
+  const result = await request("PATCH", `/advisors/${advisorId}`, {});
 
-    assert.equal(result.status, 400);
+  assert.equal(result.status, 400);
 });
 
 test("Return 404 for nonexistent advisor", async () => {
-    const result = await request(
-        "GET",
-        "/advisors/507f1f77bcf86cd799439011"
-    );
+  const result = await request("GET", "/advisors/507f1f77bcf86cd799439011");
 
-    assert.equal(result.status, 404);
+  assert.equal(result.status, 404);
 });

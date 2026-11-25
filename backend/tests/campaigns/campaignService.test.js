@@ -39,6 +39,7 @@ function makeCampaign(overrides = {}) {
 
 function makeRepository(overrides = {}) {
     const repository = {
+        findAdvisor: async (id) => String(id) === String(advisorId) ? { _id: advisorId } : null,
         createCampaign: async (data) => ({ _id: campaignId, ...data }),
         listCampaigns: async () => [],
         findCampaign: async () => makeCampaign(),
