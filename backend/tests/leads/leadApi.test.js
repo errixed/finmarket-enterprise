@@ -11,6 +11,9 @@ import initializeIdentityModels from "../../src/config/initialize-identity-model
 let server;
 let base;
 let advisorToken;
+let secondAdvisorToken;
+let secondAdvisorId;
+let specialistToken;
 
 const sample = {
     advisorId: null,
@@ -82,6 +85,47 @@ before(async () => {
     const authenticated = await login.json();
 
     advisorToken = authenticated.data.token;
+
+    const secondEmail = `lead-advisor-second-${randomUUID()}@example.com`;
+    const secondRegistration = await fetch(`${base}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            name: "Second Lead Test Advisor",
+            email: secondEmail,
+            password,
+            role: "ADVISOR"
+        })
+    });
+    assert.equal(secondRegistration.status, 201);
+    secondAdvisorId = (await secondRegistration.json()).data.advisorProfile.id;
+    const secondLogin = await fetch(`${base}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: secondEmail, password })
+    });
+    assert.equal(secondLogin.status, 200);
+    secondAdvisorToken = (await secondLogin.json()).data.token;
+
+    const specialistRegistration = await fetch(`${base}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            name: "Lead Test Specialist",
+            email: `lead-specialist-${randomUUID()}@example.com`,
+            password,
+            role: "MARKETING_SPECIALIST"
+        })
+    });
+    assert.equal(specialistRegistration.status, 201);
+    const specialistEmail = (await specialistRegistration.json()).data.user.email;
+    const specialistLogin = await fetch(`${base}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: specialistEmail, password })
+    });
+    assert.equal(specialistLogin.status, 200);
+    specialistToken = (await specialistLogin.json()).data.token;
 });
 
 after(async () => {
@@ -189,4 +233,43 @@ test("only active consent withdrawal records an unsubscribe timestamp", async ()
     assert.equal(repeated.body.data.unsubscribedAt, withdrawn.body.data.unsubscribedAt);
     const regranted = await request(path, "PATCH", { marketingConsent: true });
     assert.equal(regranted.body.data.unsubscribedAt, null);
+});
+
+test("lead access is authenticated and scoped to the advisor profile", async () => {
+    const created = await request("/leads", "POST", {
+        ...sample,
+        email: "private-record@example.com"
+    });
+    assert.equal(created.status, 201);
+
+    assert.equal((await request("/leads", "GET", undefined, null)).status, 401);
+    assert.equal((await request("/leads", "GET", undefined, specialistToken)).status, 403);
+    assert.equal((await request(`/leads/${created.body.data._id}`, "GET", undefined, secondAdvisorToken)).status, 404);
+    assert.equal((await request(`/leads?advisorId=${sample.advisorId}`, "GET", undefined, secondAdvisorToken)).status, 403);
+    assert.equal((await request("/leads", "POST", {
+        ...sample,
+        advisorId: sample.advisorId,
+        email: "spoofed-owner@example.com"
+    }, secondAdvisorToken)).status, 403);
+});
+
+test("duplicate contacts are scoped to an advisor and lifecycle order is enforced", async () => {
+    const email = "shared-contact@example.com";
+    const first = await request("/leads", "POST", { ...sample, email });
+    assert.equal(first.status, 201);
+    assert.equal((await request("/leads", "POST", { ...sample, email: email.toUpperCase() })).status, 409);
+
+    const second = await request("/leads", "POST", {
+        ...sample,
+        advisorId: secondAdvisorId,
+        email
+    }, secondAdvisorToken);
+    assert.equal(second.status, 201);
+
+    const firstPath = `/leads/${first.body.data._id}`;
+    assert.equal((await request(firstPath, "PATCH", { status: "CONVERTED" })).status, 400);
+    assert.equal((await request(firstPath, "PATCH", { status: "CONTACTED" })).status, 200);
+    assert.equal((await request(firstPath, "PATCH", { status: "CONSULTATION_REQUESTED" })).status, 200);
+    assert.equal((await request(firstPath, "PATCH", { status: "CONVERTED" })).status, 200);
+    assert.equal((await request(firstPath, "PATCH", { status: "CONTACTED" })).status, 400);
 });

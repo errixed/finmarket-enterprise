@@ -1,6 +1,6 @@
 import Campaign from "./models/Campaign.js";
 import Template from "./models/Template.js";
-import leadRepository from "../leads/leadRepository.js";
+import { findMarketingEligibleLeads } from "../leads/leadService.js";
 import { Types } from "mongoose";
 
 const campaigns = new Map();
@@ -116,22 +116,22 @@ export function findTemplate({ advisorId, templateId }) {
     return copy(template);
 }
 
-export function findAudience({ advisorId, interests, leadStatuses }) {
-    return leadRepository.findAll()
-        .filter(lead =>
-            String(lead.advisorId).toLowerCase() ===
-                String(advisorId).toLowerCase() &&
-            lead.marketingConsent === true &&
-            lead.unsubscribedAt == null &&
-            (interests.length === 0 ||
-                interests.some(interest =>
-                    interest.trim().toLowerCase() ===
-                    lead.interest.trim().toLowerCase()
-                )
-            ) &&
-            (leadStatuses.length === 0 ||
-                leadStatuses.includes(lead.status))
-        )
+export async function findAudience({ advisorId, interests, leadStatuses }) {
+    const filters = {};
+    if (interests.length > 0) {
+        filters.interest = {
+            $in: interests.map(interest => new RegExp(
+                `^${interest.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+                "i"
+            ))
+        };
+    }
+    if (leadStatuses.length > 0) {
+        filters.status = { $in: leadStatuses };
+    }
+
+    const leads = await findMarketingEligibleLeads(advisorId, filters);
+    return leads
         .map(lead => ({
             _id: lead._id,
             name: lead.name,

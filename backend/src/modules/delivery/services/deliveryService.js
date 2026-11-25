@@ -15,7 +15,7 @@ const ALLOWED_FIELDS = new Set([
     "scheduledAt"
 ]);
 
-function validateMarketingConsent(data) {
+async function validateMarketingConsent(data, advisorId) {
     if (data.channel !== "EMAIL") {
         return;
     }
@@ -28,7 +28,10 @@ function validateMarketingConsent(data) {
         );
     }
 
-    const lead = leadRepository.findById(String(data.leadId));
+    const lead = await leadRepository.findById(
+        String(data.leadId),
+        advisorId
+    );
 
     if (!lead) {
         throw new AppError(
@@ -168,8 +171,9 @@ function validateDelivery(data) {
 }
 
 async function validateDeliveryEligibility(job) {
+    const advisorId = String(job.advisorId);
     const lead = job.leadId
-        ? leadRepository.findById(String(job.leadId))
+        ? await leadRepository.findById(String(job.leadId), advisorId)
         : null;
 
     if (job.channel === "EMAIL") {
@@ -181,11 +185,11 @@ async function validateDeliveryEligibility(job) {
             );
         }
 
-        validateMarketingConsent({
+        await validateMarketingConsent({
             channel: job.channel,
             leadId: job.leadId,
             recipientEmail: job.recipientEmail
-        });
+        }, advisorId);
     }
 
     if (job.leadId && !lead) {
@@ -193,19 +197,6 @@ async function validateDeliveryEligibility(job) {
             "Lead not found.",
             404,
             "LEAD_NOT_FOUND"
-        );
-    }
-
-    const advisorId = String(job.advisorId);
-
-    if (
-        lead &&
-        String(lead.advisorId).toLowerCase() !== advisorId.toLowerCase()
-    ) {
-        throw new AppError(
-            "Lead and advisor do not match.",
-            400,
-            "ADVISOR_MISMATCH"
         );
     }
 
@@ -306,8 +297,19 @@ export const processDelivery = async (jobId) => {
 };
 
 export const queueDelivery = async (deliveryData) => {
+    if (deliveryData?.leadId && !deliveryData.advisorId) {
+        throw new AppError(
+            "advisorId is required when a lead is selected.",
+            400,
+            "ADVISOR_ID_REQUIRED"
+        );
+    }
+
     const lead = deliveryData?.leadId
-        ? leadRepository.findById(String(deliveryData.leadId))
+        ? await leadRepository.findById(
+            String(deliveryData.leadId),
+            String(deliveryData.advisorId)
+        )
         : null;
 
     if (deliveryData?.leadId && !lead) {
@@ -340,7 +342,7 @@ export const queueDelivery = async (deliveryData) => {
         advisorId
     });
 
-    validateMarketingConsent(validatedData);
+    await validateMarketingConsent(validatedData, advisorId);
 
     await validateDeliveryCampaign(validatedData, advisorId);
 
