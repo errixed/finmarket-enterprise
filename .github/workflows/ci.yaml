@@ -4,12 +4,14 @@ on:
     push:
         branches:
             - main
+            - dev
             - develop
             - "feature/**"
 
     pull_request:
         branches:
             - main
+            - dev
             - develop
 
     workflow_dispatch:
@@ -35,26 +37,16 @@ jobs:
             run:
                 working-directory: backend
 
-        services:
-            mongodb:
-                image: mongo:8.0
-
-                ports:
-                    - 27017:27017
-
-                options: >-
-                    --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
-                    --health-interval 10s
-                    --health-timeout 5s
-                    --health-retries 10
-
         env:
             NODE_ENV: test
             PORT: 3001
-            MONGO_URI: mongodb://127.0.0.1:27017/finmarket_test
-            CAMPAIGN_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+            MONGO_URI: mongodb://127.0.0.1:27017/finmarket_test?replicaSet=rs0
+            DELIVERY_TEST_MONGO_URI: mongodb://127.0.0.1:27017/finmarket_delivery_test?replicaSet=rs0
+            CAMPAIGN_TEST_MONGO_URI: mongodb://127.0.0.1:27017/finmarket_campaign_test?replicaSet=rs0
             JWT_SECRET: ci-only-test-secret-not-for-production
             CORS_ORIGIN: http://localhost:5173
+            DELIVERY_EMAIL_PROVIDER: mock
+            DELIVERY_FACEBOOK_PROVIDER: mock
 
         steps:
             - name: Checkout repository
@@ -66,7 +58,36 @@ jobs:
               uses: actions/setup-node@v6
               with:
                   node-version: ${{ env.NODE_VERSION }}
+            
+            - name: Start MongoDB replica set
+              run: |
+                  docker run -d \
+                    --name mongodb-ci \
+                    -p 27017:27017 \
+                    mongo:8.0 \
+                    --replSet rs0 \
+                    --bind_ip_all
 
+                  until docker exec mongodb-ci mongosh --quiet \
+                    --eval 'db.adminCommand({ ping: 1 }).ok' \
+                    | grep -q 1; do
+                      sleep 2
+                  done
+
+                  docker exec mongodb-ci mongosh --quiet --eval '
+                    rs.initiate({
+                      _id: "rs0",
+                      members: [
+                        { _id: 0, host: "localhost:27017" }
+                      ]
+                    })
+                  '
+
+                  until docker exec mongodb-ci mongosh --quiet \
+                    --eval 'db.hello().isWritablePrimary' \
+                    | grep -q true; do
+                      sleep 2
+                  done
             - name: Install backend dependencies
               run: |
                   if [ -f package-lock.json ]; then
