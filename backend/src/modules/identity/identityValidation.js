@@ -177,3 +177,81 @@ export function validateRegistration(data) {
             : null
     };
 }
+export function validateAccountUpdate(data) {
+    requireObject(data);
+
+    allowOnly(data, [
+        "name",
+        "email",
+        "currentPassword"
+    ]);
+
+    const changes = {};
+
+    if (data.name !== undefined) {
+        if (
+            typeof data.name !== "string" ||
+            data.name.trim().length < 2 ||
+            data.name.trim().length > 100
+        ) {
+            fail("Name must contain 2 to 100 characters.");
+        }
+
+        changes.name = data.name.trim();
+    }
+
+    if (data.email !== undefined) {
+        changes.email = normalizeEmail(data.email);
+
+        if (
+            typeof data.currentPassword !== "string" ||
+            data.currentPassword.length === 0 ||
+            Buffer.byteLength(data.currentPassword) > 1024
+        ) {
+            fail("Current password is required to change email.");
+        }
+    }
+
+    if (Object.keys(changes).length === 0) {
+        fail("At least one account field must be supplied.");
+    }
+
+    return {
+        changes,
+        currentPassword: data.currentPassword
+    };
+}
+
+export function validatePasswordChange(data) {
+    requireObject(data);
+
+    allowOnly(data, [
+        "currentPassword",
+        "newPassword"
+    ]);
+
+    if (
+        typeof data.currentPassword !== "string" ||
+        data.currentPassword.length === 0 ||
+        Buffer.byteLength(data.currentPassword) > 1024
+    ) {
+        fail("Current password is required.");
+    }
+
+    if (
+        typeof data.newPassword !== "string" ||
+        data.newPassword.length < 8 ||
+        Buffer.byteLength(data.newPassword) > 1024
+    ) {
+        fail("New password must contain at least 8 characters.");
+    }
+
+    if (data.currentPassword === data.newPassword) {
+        fail("New password must differ from the current password.");
+    }
+
+    return {
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword
+    };
+}

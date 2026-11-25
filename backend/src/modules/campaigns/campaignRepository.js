@@ -2,7 +2,9 @@ import Campaign from "./models/Campaign.js";
 import Template from "./models/Template.js";
 import AdvisorProfile from "../identity/models/AdvisorProfile.js";
 import User from "../identity/models/User.js";
-import Assignment from "../identity/models/AdvisorSpecialistAssignment.js";
+import {
+    authorizationService
+} from "../identity/authorizationService.js";
 import { findMarketingEligibleLeads } from "../leads/leadService.js";
 
 const plain = (document) =>
@@ -22,31 +24,23 @@ export const findUser = (userId) =>
         _id: userId,
         isActive: true
     }).select("_id name role").lean();
-
-export const acceptedAdvisorIds = async (specialistUserId) => {
-    const ids = await Assignment.distinct("advisorId", {
-        specialistUserId,
-        status: "ACCEPTED",
-        revokedAt: null
-    });
-
-    return AdvisorProfile.distinct("_id", {
-        _id: { $in: ids }
-    });
+export const acceptedAdvisorIds = async (
+    specialistUserId
+) => {
+    return authorizationService.getAcceptedAdvisorIds(
+        String(specialistUserId)
+    );
 };
 
 export const hasAcceptedRelationship = async (
     advisorId,
     specialistUserId
-) => Boolean(
-    await Assignment.exists({
-        advisorId,
-        specialistUserId,
-        status: "ACCEPTED",
-        revokedAt: null
-    })
-);
-
+) => {
+    return authorizationService.hasAcceptedAssignment(
+        String(advisorId),
+        String(specialistUserId)
+    );
+};
 export async function createTemplate(data) {
     return plain(await Template.create(data));
 }

@@ -6,6 +6,7 @@ import initializeIdentityModels from "./config/initialize-identity-models.js";
 import initializeAutomation, {
     stopAutomationWorker
 } from "./modules/automation/initializeAutomation.js";
+import logError from "./utils/logError.js";
 
 let server;
 let shuttingDown = false;
@@ -41,7 +42,7 @@ async function shutdown(signal) {
         clearTimeout(forceExit);
         process.exit(0);
     } catch (error) {
-        console.error("Shutdown failed:", error.message);
+        logError("Shutdown failed:", error);
         process.exit(1);
     }
 }
@@ -69,7 +70,7 @@ try {
         void shutdown("SIGINT");
     });
 } catch (error) {
-    console.error("Backend startup failed:", error.message);
+    logError("Backend startup failed:", error);
 
     await mongoose.disconnect();
 

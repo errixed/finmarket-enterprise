@@ -25,7 +25,13 @@ const userSchema = new mongoose.Schema(
             required: true,
             select: false
         },
-
+        tokenVersion: {
+            type: Number,
+            default: 0,
+            min: 0,
+            required: true,
+            select: false
+        },
         role: {
             type: String,
             enum: Object.values(ROLES),
@@ -48,6 +54,7 @@ const userSchema = new mongoose.Schema(
             transform(doc, ret) {
                 delete ret.passwordHash;
                 delete ret.__v;
+                delete ret.tokenVersion;
                 return ret;
             }
         }

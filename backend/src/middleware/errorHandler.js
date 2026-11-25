@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import AppError from "../utils/AppError.js";
+import logError from "../utils/logError.js";
 
 export default function errorHandler(err, req, res, next) {
     if (res.headersSent) {
@@ -18,6 +20,12 @@ export default function errorHandler(err, req, res, next) {
         message = "The request contains invalid JSON.";
     }
 
+    if (err.type === "entity.too.large") {
+        statusCode = 413;
+        code = "PAYLOAD_TOO_LARGE";
+        message = "The request body is too large.";
+    }
+
     if (
         err instanceof mongoose.Error.ValidationError ||
         err instanceof mongoose.Error.CastError
@@ -34,8 +42,14 @@ export default function errorHandler(err, req, res, next) {
     }
 
     if (
-        err.name === "MongoServerSelectionError" ||
-        err.name === "MongoNetworkError"
+        [
+            "MongoServerSelectionError",
+            "MongooseServerSelectionError",
+            "MongoNetworkError",
+            "MongoNetworkTimeoutError",
+            "MongoNotConnectedError",
+            "MongoTopologyClosedError"
+        ].includes(err.name)
     ) {
         statusCode = 503;
         code = "DATABASE_UNAVAILABLE";
@@ -50,13 +64,26 @@ export default function errorHandler(err, req, res, next) {
     }
 
     if (statusCode >= 500) {
-        console.error("Server error:", {
-            name: err.name,
-            code: err.code,
-            message: err.message
-        });
+        logError("Server error:", err);
 
-        if (statusCode === 500) {
+        if (statusCode === 503) {
+            const safeErrors = {
+                DATABASE_UNAVAILABLE:
+                    "Database temporarily unavailable.",
+                AUTH_UNAVAILABLE:
+                    "Authentication is not available.",
+                DELIVERY_UNAVAILABLE:
+                    "Delivery service temporarily unavailable.",
+                SERVICE_UNAVAILABLE:
+                    "Service temporarily unavailable."
+            };
+
+            if (!Object.hasOwn(safeErrors, code)) {
+                code = "SERVICE_UNAVAILABLE";
+            }
+
+            message = safeErrors[code];
+        } else {
             code = "INTERNAL_ERROR";
             message = "Internal server error.";
         }

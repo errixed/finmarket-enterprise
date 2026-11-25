@@ -11,6 +11,7 @@ import User from "../src/modules/identity/models/User.js";
 import { hashPassword } from "../src/modules/identity/passwordService.js";
 import { normalizeEmail } from "../src/modules/identity/identityValidation.js";
 import { ROLES } from "../src/modules/identity/identityConstants.js";
+import logError from "../src/utils/logError.js";
 
 async function main() {
     validateConfiguration();
@@ -26,10 +27,12 @@ async function main() {
         name.length < 2 ||
         name.length > 100 ||
         typeof password !== "string" ||
-        password.length < 12
+        password.length < 12 ||
+        Buffer.byteLength(password) > 1024 ||
+        /^replace_/i.test(password)
     ) {
         throw new Error(
-            "Valid ADMIN_NAME, ADMIN_EMAIL and ADMIN_PASSWORD are required."
+            "Valid ADMIN_NAME, ADMIN_EMAIL and a non-placeholder ADMIN_PASSWORD are required."
         );
     }
 
@@ -60,7 +63,7 @@ try {
     await main();
     await mongoose.disconnect();
 } catch (error) {
-    console.error("Provisioning failed:", error.message);
+    logError("Provisioning failed:", error);
     await mongoose.disconnect();
     process.exitCode = 1;
 }

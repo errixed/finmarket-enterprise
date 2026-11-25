@@ -5,6 +5,41 @@ import { ROLES } from "./identityConstants.js";
 import { validId, fail } from "./identityValidation.js";
 
 export const authorizationService = {
+    async getAcceptedAdvisorIds(specialistUserId) {
+        const userId = validId(
+            specialistUserId,
+            "Specialist User ID"
+        );
+
+        const specialist =
+            await identityRepository.findUserById(userId);
+
+        if (
+            !specialist ||
+            !specialist.isActive ||
+            specialist.role !== ROLES.MARKETING_SPECIALIST
+        ) {
+            return [];
+        }
+
+        const advisorIds =
+            await assignmentRepository.findAcceptedAdvisorIds(
+                userId
+            );
+
+        const results = await Promise.all(
+            advisorIds.map(async id => {
+                const advisorId = String(id);
+
+                const exists =
+                    await this.advisorExists(advisorId);
+
+                return exists ? advisorId : null;
+            })
+        );
+
+        return results.filter(id => id !== null);
+    },
     async getAdvisorIdForUser(userId) {
         validId(userId, "User ID");
 
@@ -131,6 +166,13 @@ export const authorizationService = {
         campaign,
         hasCampaignAssignment
     ) {
+        if (!auth?.userId) {
+            fail(
+                "Authentication required.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
         if (!campaign) {
             fail(
                 "Campaign not found.",

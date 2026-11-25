@@ -19,6 +19,16 @@ import {
     authorizePermissions,
     hasRolePermission
 } from "../../src/middleware/roleMiddleware.js";
+import {
+    connectTestDatabase,
+    disconnectTestDatabase
+} from "../helpers/testDatabase.js";
+import {
+    authorizationService
+} from "../../src/modules/identity/authorizationService.js";
+
+import AdvisorSpecialistAssignment
+    from "../../src/modules/identity/models/AdvisorSpecialistAssignment.js";
 
 let server;
 let baseURL;
@@ -78,7 +88,7 @@ before(async () => {
         throw new Error("JWT_SECRET is required.");
     }
 
-    await mongoose.connect(process.env.MONGO_URI);
+    await connectTestDatabase("identity_phase_ii");
 
     await initializeIdentityModels();
 
@@ -110,13 +120,14 @@ before(async () => {
 });
 
 after(async () => {
-    if (server) {
-        await new Promise(resolve => server.close(resolve));
-    }
-
-    if (mongoose.connection.readyState === 1) {
-        await mongoose.connection.dropDatabase();
-        await mongoose.disconnect();
+    try {
+        if (server) {
+            await new Promise(resolve =>
+                server.close(resolve)
+            );
+        }
+    } finally {
+        await disconnectTestDatabase();
     }
 });
 
@@ -964,4 +975,666 @@ test("M1: inactive Advisors are hidden from public directory and lookup", async 
 
     assert.ok(storedProfile);
     assert.equal(storedProfile.isPublic, true);
+});
+test("M1: Administrator can retrieve an individual user", async () => {
+    const result = await request(
+        "GET",
+        `/admin/users/${advisorUserId}`,
+        undefined,
+        adminToken
+    );
+
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.id, advisorUserId);
+    assert.equal(result.body.data.role, "ADVISOR");
+
+    assert.equal(
+        result.body.data.passwordHash,
+        undefined
+    );
+});
+
+test("M1: Administrator can inspect role permissions", async () => {
+    const result = await request(
+        "GET",
+        "/admin/roles",
+        undefined,
+        adminToken
+    );
+
+    assert.equal(result.status, 200);
+    assert.equal(result.body.count, 3);
+
+    const admin = result.body.data.find(
+        item => item.role === "ADMIN"
+    );
+
+    assert.ok(admin);
+
+    assert.ok(
+        admin.permissions.includes("MANAGE_PERMISSIONS")
+    );
+});
+
+test("M1: Administrator can inspect user permissions", async () => {
+    const result = await request(
+        "GET",
+        `/admin/users/${advisorUserId}/permissions`,
+        undefined,
+        adminToken
+    );
+
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.role, "ADVISOR");
+
+    assert.ok(
+        result.body.data.permissions.includes(
+            "MANAGE_OWN_PROFILE"
+        )
+    );
+
+    assert.ok(
+        !result.body.data.permissions.includes(
+            "MANAGE_PLATFORM"
+        )
+    );
+});
+
+test("M1: Advisor cannot inspect administrative permissions", async () => {
+    const result = await request(
+        "GET",
+        "/admin/roles",
+        undefined,
+        advisorToken
+    );
+
+    assert.equal(result.status, 403);
+});
+
+test("M1: Invalid administrative user ID is rejected", async () => {
+    const result = await request(
+        "GET",
+        "/admin/users/invalid-id",
+        undefined,
+        adminToken
+    );
+
+    assert.equal(result.status, 400);
+});
+
+test("M1: Nonexistent administrative user returns 404", async () => {
+    const id = new mongoose.Types.ObjectId().toString();
+
+    const result = await request(
+        "GET",
+        `/admin/users/${id}`,
+        undefined,
+        adminToken
+    );
+
+    assert.equal(result.status, 404);
+});
+
+test("M1: Administrator cannot modify privileged fields through status endpoint", async () => {
+    const result = await request(
+        "PATCH",
+        `/admin/users/${advisorUserId}/status`,
+        {
+            isActive: true,
+            role: "ADMIN"
+        },
+        adminToken
+    );
+
+    assert.equal(result.status, 400);
+
+    const user = await User.findById(advisorUserId);
+
+    assert.equal(user.role, "ADVISOR");
+});
+
+test("M1: Administrator cannot deactivate their account using uppercase ID", async () => {
+    const me = await request(
+        "GET",
+        "/auth/me",
+        undefined,
+        adminToken
+    );
+
+    const id = me.body.data.user.id.toUpperCase();
+
+    const result = await request(
+        "PATCH",
+        `/admin/users/${id}/status`,
+        {
+            isActive: false
+        },
+        adminToken
+    );
+
+    assert.equal(result.status, 409);
+});
+test("M1: Administrator can revoke an accepted assignment", async () => {
+    const email =
+        `admin-revoke-${randomUUID()}@example.com`;
+
+    const registration = await request(
+        "POST",
+        "/auth/register",
+        {
+            name: "Revocation Test Specialist",
+            email,
+            password: "Password123!",
+            role: "MARKETING_SPECIALIST"
+        }
+    );
+
+    assert.equal(registration.status, 201);
+
+    const userId = registration.body.data.user.id;
+
+    const login = await request(
+        "POST",
+        "/auth/login",
+        {
+            email,
+            password: "Password123!"
+        }
+    );
+
+    assert.equal(login.status, 200);
+
+    const invitation = await request(
+        "POST",
+        "/advisor-invitations",
+        {
+            specialistUserId: userId
+        },
+        advisorToken
+    );
+
+    assert.equal(invitation.status, 201);
+
+    const assignmentId = invitation.body.data.id;
+
+    const accepted = await request(
+        "POST",
+        `/advisor-invitations/${assignmentId}/accept`,
+        {},
+        login.body.data.token
+    );
+
+    assert.equal(accepted.status, 200);
+
+    assert.equal(
+        await authorizationService.hasAcceptedAssignment(
+            advisorId,
+            userId
+        ),
+        true
+    );
+
+    const revoked = await request(
+        "DELETE",
+        `/admin/assignments/${assignmentId}`,
+        undefined,
+        adminToken
+    );
+
+    assert.equal(revoked.status, 200);
+    assert.equal(revoked.body.data.status, "REVOKED");
+
+    const stored =
+        await AdvisorSpecialistAssignment.findById(
+            assignmentId
+        );
+
+    assert.equal(stored.status, "REVOKED");
+    assert.ok(stored.revokedAt);
+
+    assert.equal(
+        await authorizationService.hasAcceptedAssignment(
+            advisorId,
+            userId
+        ),
+        false
+    );
+
+    const repeated = await request(
+        "DELETE",
+        `/admin/assignments/${assignmentId}`,
+        undefined,
+        adminToken
+    );
+
+    assert.equal(repeated.status, 404);
+});
+
+test("M1: Invalid administrative assignment ID is rejected", async () => {
+    const result = await request(
+        "DELETE",
+        "/admin/assignments/invalid-id",
+        undefined,
+        adminToken
+    );
+
+    assert.equal(result.status, 400);
+});
+
+test("M1: Advisor cannot use administrative revocation endpoint", async () => {
+    const id = new mongoose.Types.ObjectId().toString();
+
+    const result = await request(
+        "DELETE",
+        `/admin/assignments/${id}`,
+        undefined,
+        advisorToken
+    );
+
+    assert.equal(result.status, 403);
+});
+test("M1: Specialist can maintain their account securely", async () => {
+    const email =
+        `account-${randomUUID()}@example.com`;
+
+    const registration = await request(
+        "POST",
+        "/auth/register",
+        {
+            name: "Account Test Specialist",
+            email,
+            password: "Password123!",
+            role: "MARKETING_SPECIALIST"
+        }
+    );
+
+    assert.equal(registration.status, 201);
+
+    const userId = registration.body.data.user.id;
+
+    const login = await request(
+        "POST",
+        "/auth/login",
+        {
+            email,
+            password: "Password123!"
+        }
+    );
+
+    assert.equal(login.status, 200);
+
+    const token = login.body.data.token;
+
+    const updated = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            name: "Updated Specialist"
+        },
+        token
+    );
+
+    assert.equal(updated.status, 200);
+
+    assert.equal(
+        updated.body.data.user.name,
+        "Updated Specialist"
+    );
+
+    assert.equal(
+        updated.body.data.user.passwordHash,
+        undefined
+    );
+
+    const forbidden = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            role: "ADMIN"
+        },
+        token
+    );
+
+    assert.equal(forbidden.status, 400);
+
+    const activityChange = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            isActive: false
+        },
+        token
+    );
+
+    assert.equal(activityChange.status, 400);
+
+    const missingPassword = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            email: "new@example.com"
+        },
+        token
+    );
+
+    assert.equal(missingPassword.status, 400);
+
+    const wrongPassword = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            email: "new@example.com",
+            currentPassword: "WrongPassword"
+        },
+        token
+    );
+
+    assert.equal(wrongPassword.status, 401);
+
+    const duplicateEmail = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            email: advisorEmail,
+            currentPassword: "Password123!"
+        },
+        token
+    );
+
+    assert.equal(duplicateEmail.status, 409);
+
+    const newEmail =
+        `updated-${randomUUID()}@example.com`;
+
+    const changedEmail = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            email: newEmail,
+            currentPassword: "Password123!"
+        },
+        token
+    );
+
+    assert.equal(changedEmail.status, 200);
+
+    assert.equal(
+        changedEmail.body.data.user.email,
+        newEmail
+    );
+
+    const changedPassword = await request(
+        "PATCH",
+        "/auth/me/password",
+        {
+            currentPassword: "Password123!",
+            newPassword: "NewPassword456!"
+        },
+        token
+    );
+
+    assert.equal(changedPassword.status, 200);
+
+    const oldToken = await request(
+        "GET",
+        "/auth/me",
+        undefined,
+        token
+    );
+
+    assert.equal(oldToken.status, 401);
+
+    const oldPassword = await request(
+        "POST",
+        "/auth/login",
+        {
+            email: newEmail,
+            password: "Password123!"
+        }
+    );
+
+    assert.equal(oldPassword.status, 401);
+
+    const newLogin = await request(
+        "POST",
+        "/auth/login",
+        {
+            email: newEmail,
+            password: "NewPassword456!"
+        }
+    );
+
+    assert.equal(newLogin.status, 200);
+
+    const stored = await User.findById(userId)
+        .select("+passwordHash +tokenVersion");
+
+    assert.equal(stored.role, "MARKETING_SPECIALIST");
+    assert.equal(stored.email, newEmail);
+    assert.equal(stored.tokenVersion, 1);
+
+    assert.notEqual(
+        stored.passwordHash,
+        "NewPassword456!"
+    );
+
+    const me = await request(
+        "GET",
+        "/auth/me",
+        undefined,
+        newLogin.body.data.token
+    );
+
+    assert.equal(me.status, 200);
+
+    assert.equal(
+        me.body.data.user.tokenVersion,
+        undefined
+    );
+
+    assert.equal(
+        me.body.data.user.passwordHash,
+        undefined
+    );
+});
+
+test("M1: Deactivation permanently invalidates previously issued JWTs", async () => {
+    const email =
+        `deactivate-${randomUUID()}@example.com`;
+
+    const registration = await request(
+        "POST",
+        "/auth/register",
+        {
+            name: "Deactivation Test Specialist",
+            email,
+            password: "Password123!",
+            role: "MARKETING_SPECIALIST"
+        }
+    );
+
+    assert.equal(registration.status, 201);
+
+    const userId = registration.body.data.user.id;
+
+    const login = await request(
+        "POST",
+        "/auth/login",
+        {
+            email,
+            password: "Password123!"
+        }
+    );
+
+    assert.equal(login.status, 200);
+
+    const oldToken = login.body.data.token;
+
+    const deactivate = await request(
+        "PATCH",
+        `/admin/users/${userId}/status`,
+        { isActive: false },
+        adminToken
+    );
+
+    assert.equal(deactivate.status, 200);
+
+    const inactiveAccess = await request(
+        "GET",
+        "/auth/me",
+        undefined,
+        oldToken
+    );
+
+    assert.equal(inactiveAccess.status, 401);
+
+    const permissions = await request(
+        "GET",
+        `/admin/users/${userId}/permissions`,
+        undefined,
+        adminToken
+    );
+
+    assert.equal(permissions.status, 200);
+
+    assert.deepEqual(
+        permissions.body.data.permissions,
+        []
+    );
+
+    const reactivate = await request(
+        "PATCH",
+        `/admin/users/${userId}/status`,
+        { isActive: true },
+        adminToken
+    );
+
+    assert.equal(reactivate.status, 200);
+
+    const staleToken = await request(
+        "GET",
+        "/auth/me",
+        undefined,
+        oldToken
+    );
+
+    assert.equal(staleToken.status, 401);
+
+    const newLogin = await request(
+        "POST",
+        "/auth/login",
+        {
+            email,
+            password: "Password123!"
+        }
+    );
+
+    assert.equal(newLogin.status, 200);
+});
+
+test("M1: Account modification requires authentication", async () => {
+    const result = await request(
+        "PATCH",
+        "/auth/me",
+        {
+            name: "Unauthorized Update"
+        }
+    );
+
+    assert.equal(result.status, 401);
+});
+
+test("M1: Password changes require authentication", async () => {
+    const result = await request(
+        "PATCH",
+        "/auth/me/password",
+        {
+            currentPassword: "Password123!",
+            newPassword: "NewPassword123!"
+        }
+    );
+
+    assert.equal(result.status, 401);
+});
+test("M1: Inactive advisors cannot authorize specialist relationships", async () => {
+    const advisorRegistration = await request(
+        "POST",
+        "/auth/register",
+        {
+            name: "Relationship Advisor",
+            email: `relationship-${randomUUID()}@example.com`,
+            password: "Password123!",
+            role: "ADVISOR"
+        }
+    );
+
+    assert.equal(advisorRegistration.status, 201);
+
+    const ownerId =
+        advisorRegistration.body.data.user.id;
+
+    const profileId =
+        advisorRegistration.body.data.advisorProfile.id;
+
+    const specialistRegistration = await request(
+        "POST",
+        "/auth/register",
+        {
+            name: "Relationship Specialist",
+            email: `relationship-${randomUUID()}@example.com`,
+            password: "Password123!",
+            role: "MARKETING_SPECIALIST"
+        }
+    );
+
+    assert.equal(specialistRegistration.status, 201);
+
+    const userId =
+        specialistRegistration.body.data.user.id;
+
+    await AdvisorSpecialistAssignment.create({
+        advisorId: profileId,
+        specialistUserId: userId,
+        status: "ACCEPTED",
+        acceptedAt: new Date()
+    });
+
+    assert.equal(
+        await authorizationService.hasAcceptedAssignment(
+            profileId,
+            userId
+        ),
+        true
+    );
+
+    const before =
+        await authorizationService.getAcceptedAdvisorIds(
+            userId
+        );
+
+    assert.ok(before.includes(profileId));
+
+    const deactivated = await request(
+        "PATCH",
+        `/admin/users/${ownerId}/status`,
+        { isActive: false },
+        adminToken
+    );
+
+    assert.equal(deactivated.status, 200);
+
+    assert.equal(
+        await authorizationService.hasAcceptedAssignment(
+            profileId,
+            userId
+        ),
+        false
+    );
+
+    const after =
+        await authorizationService.getAcceptedAdvisorIds(
+            userId
+        );
+
+    assert.ok(!after.includes(profileId));
 });

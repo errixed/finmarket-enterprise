@@ -26,19 +26,21 @@ services:
     environment:
       PORT: "3001"
       NODE_ENV: ${NODE_ENV:-development}
-      MONGO_URI: mongodb://mongodb:27017/finmarket_enterprise?replicaSet=rs0
+      MONGO_URI: "${MONGO_URI:-mongodb://mongodb:27017/finmarket_enterprise?replicaSet=rs0}"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
       JWT_ISSUER: ${JWT_ISSUER:-finmarket-enterprise}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-finmarket-api}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      DELIVERY_EMAIL_PROVIDER: ${DELIVERY_EMAIL_PROVIDER:-mock}
+      DELIVERY_FACEBOOK_PROVIDER: ${DELIVERY_FACEBOOK_PROVIDER:-mock}
       GMAIL_USER: ${GMAIL_USER:-}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
       META_ACCESS_TOKEN: ${META_ACCESS_TOKEN:-}
       META_PAGE_ID: ${META_PAGE_ID:-}
     depends_on:
-      mongo-init:
-        condition: service_completed_successfully
+      mongodb:
+        condition: service_healthy
     networks:
       - app_network
     healthcheck:
@@ -68,27 +70,33 @@ services:
       test:
         - CMD
         - mongosh
+        - "mongodb://localhost:27017/admin?directConnection=true"
         - --quiet
         - --eval
-        - "quit(db.adminCommand('ping').ok === 1 ? 0 : 1)"
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
+        - |
+          try {
+              rs.status();
+          } catch (error) {
+              if (error.codeName !== "NotYetInitialized") {
+                  throw error;
+              }
 
-  mongo-init:
-    image: mongo:7
-    restart: "no"
-    depends_on:
-      mongodb:
-        condition: service_healthy
-    entrypoint:
-      - bash
-      - /init-replica.sh
-    volumes:
-      - ./docker/mongo/init-replica.sh:/init-replica.sh:ro
-    networks:
-      - app_network
+              rs.initiate({
+                  _id: "rs0",
+                  members: [
+                      {
+                          _id: 0,
+                          host: "mongodb:27017"
+                      }
+                  ]
+              });
+          }
+
+          quit(db.hello().isWritablePrimary ? 0 : 1);
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
 
 networks:
   app_network:

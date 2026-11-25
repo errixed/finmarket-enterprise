@@ -1,6 +1,31 @@
 import { identityService } from "./identityService.js";
 
 export const identityController = {
+    async updateOwnAccount(req, res) {
+        const result =
+            await identityService.updateOwnAccount(
+                req.body,
+                req.auth
+            );
+
+        return res.status(200).json({
+            success: true,
+            data: result
+        });
+    },
+
+    async changePassword(req, res) {
+        const result =
+            await identityService.changePassword(
+                req.body,
+                req.auth
+            );
+
+        return res.status(200).json({
+            success: true,
+            data: result
+        });
+    },
     async register(req, res) {
         const result = await identityService.register(
             req.body

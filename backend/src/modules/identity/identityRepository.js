@@ -17,7 +17,8 @@ export const identityRepository = {
     },
 
     async findUserByEmail(email, includePassword = false) {
-        let query = User.findOne({ email });
+        let query = User.findOne({ email })
+            .select("+tokenVersion");
 
         if (includePassword) {
             query = query.select("+passwordHash");
@@ -26,8 +27,15 @@ export const identityRepository = {
         return query.exec();
     },
 
-    async findUserById(id) {
-        return User.findById(id);
+    async findUserById(id, includePassword = false) {
+        let query = User.findById(id)
+            .select("+tokenVersion");
+
+        if (includePassword) {
+            query = query.select("+passwordHash");
+        }
+
+        return query.exec();
     },
 
     async createAdvisorProfile(data, session = null) {
@@ -98,5 +106,49 @@ export const identityRepository = {
                 runValidators: true
             }
         );
-    }
+    },
+
+    async updateOwnAccount(id, changes, expectedPasswordHash) {
+        const filter = {
+            _id: id,
+            isActive: true
+        };
+
+        if (expectedPasswordHash !== undefined) {
+            filter.passwordHash = expectedPasswordHash;
+        }
+
+        return User.findOneAndUpdate(
+            filter,
+            {
+                $set: changes
+            },
+            {
+                returnDocument: "after",
+                runValidators: true
+            }
+        );
+    },
+
+    async changePassword(id, expectedHash, newHash) {
+        return User.findOneAndUpdate(
+            {
+                _id: id,
+                passwordHash: expectedHash,
+                isActive: true
+            },
+            {
+                $set: {
+                    passwordHash: newHash
+                },
+                $inc: {
+                    tokenVersion: 1
+                }
+            },
+            {
+                returnDocument: "after",
+                runValidators: true
+            }
+        );
+    },
 };

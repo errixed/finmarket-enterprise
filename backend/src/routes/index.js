@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import { Router } from "express";
 
 import {
@@ -18,12 +17,14 @@ import campaignRoutes from "../modules/campaigns/campaignRoutes.js";
 import deliveryRoutes from "../modules/delivery/routes/deliveryRoutes.js";
 import automationRoutes from "../modules/automation/automationRoutes.js";
 import analyticsRoutes from "../modules/automation/analyticsRoutes.js";
+import {
+    isDatabaseHealthy
+} from "../config/database.js";
 
 const router = Router();
-
-router.get("/health", (req, res) => {
+router.get("/health", async (req, res) => {
     const databaseConnected =
-        mongoose.connection.readyState === 1;
+        await isDatabaseHealthy();
 
     return res.status(
         databaseConnected ? 200 : 503
@@ -41,7 +42,6 @@ router.get("/health", (req, res) => {
         }
     });
 });
-
 router.use("/auth", authRoutes);
 router.use("/advisors", advisorRoutes);
 

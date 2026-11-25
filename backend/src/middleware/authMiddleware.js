@@ -71,6 +71,16 @@ export async function authenticate(req, res, next) {
                 "UNAUTHORIZED"
             );
         }
+        if (
+            (payload.tokenVersion ?? 0) !==
+            (user.tokenVersion ?? 0)
+        ) {
+            throw new AppError(
+                "Authentication token is no longer valid.",
+                401,
+                "INVALID_TOKEN"
+            );
+        }
 
         let advisorId = null;
 

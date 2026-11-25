@@ -17,3 +17,24 @@ export default async function connectDatabase(uri) {
 
     return mongoose.connection;
 }
+
+export async function isDatabaseHealthy() {
+    if (
+        mongoose.connection.readyState !== 1 ||
+        !mongoose.connection.db
+    ) {
+        return false;
+    }
+
+    try {
+        const result =
+            await mongoose.connection.db.command(
+                { ping: 1 },
+                { timeoutMS: 2000 }
+            );
+
+        return result.ok === 1;
+    } catch {
+        return false;
+    }
+}

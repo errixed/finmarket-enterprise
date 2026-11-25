@@ -2,12 +2,13 @@ import { Router } from "express";
 
 import { identityController } from "./identityController.js";
 
-import { authenticate } from "../../middleware/authMiddleware.js";
+import {
+    authenticate
+} from "../../middleware/authMiddleware.js";
+
 import {
     authorizePermissions
 } from "../../middleware/roleMiddleware.js";
-
-import { ROLES } from "./identityConstants.js";
 
 export const authRoutes = Router();
 export const advisorRoutes = Router();
@@ -26,6 +27,20 @@ authRoutes.get(
     "/me",
     authenticate,
     identityController.me
+);
+
+authRoutes.patch(
+    "/me",
+    authenticate,
+    authorizePermissions("MANAGE_OWN_ACCOUNT"),
+    identityController.updateOwnAccount
+);
+
+authRoutes.patch(
+    "/me/password",
+    authenticate,
+    authorizePermissions("MANAGE_OWN_ACCOUNT"),
+    identityController.changePassword
 );
 
 advisorRoutes.get(

@@ -118,9 +118,20 @@ export const assignmentRepository = {
         const record = await AdvisorSpecialistAssignment.exists({
             advisorId,
             specialistUserId,
-            status: STATUS.ACCEPTED
+            status: STATUS.ACCEPTED,
+            revokedAt: null
         });
 
         return Boolean(record);
-    }
+    },
+    async findAcceptedAdvisorIds(specialistUserId) {
+    return AdvisorSpecialistAssignment.distinct(
+        "advisorId",
+        {
+            specialistUserId,
+            status: STATUS.ACCEPTED,
+            revokedAt: null
+        }
+    );
+},
 };

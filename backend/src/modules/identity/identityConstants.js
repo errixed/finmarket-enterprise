@@ -23,14 +23,16 @@ export const ASSIGNMENT_STATUSES = Object.freeze({
 });
 
 export const ROLE_RULES = Object.freeze({
-    [ROLES.ADMIN]: [
+    [ROLES.ADMIN]: Object.freeze([
+        "MANAGE_OWN_ACCOUNT",
         "MANAGE_USERS",
         "MANAGE_PERMISSIONS",
         "MANAGE_PLATFORM",
         "REVIEW_ASSIGNMENTS"
-    ],
+    ]),
 
-    [ROLES.ADVISOR]: [
+    [ROLES.ADVISOR]: Object.freeze([
+        "MANAGE_OWN_ACCOUNT",
         "MANAGE_OWN_PROFILE",
         "MANAGE_OWN_LEADS",
         "MANAGE_OWN_CAMPAIGNS",
@@ -38,12 +40,12 @@ export const ROLE_RULES = Object.freeze({
         "MANAGE_OWN_AUTOMATIONS",
         "INVITE_SPECIALISTS",
         "REVOKE_OWN_ASSIGNMENTS"
-    ],
+    ]),
 
-    [ROLES.MARKETING_SPECIALIST]: [
+    [ROLES.MARKETING_SPECIALIST]: Object.freeze([
         "MANAGE_OWN_ACCOUNT",
         "RESPOND_TO_INVITATIONS",
         "VIEW_ASSIGNED_CAMPAIGNS",
         "MANAGE_PERMITTED_DELIVERIES"
-    ]
+    ])
 });

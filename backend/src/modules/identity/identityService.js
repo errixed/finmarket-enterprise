@@ -9,6 +9,8 @@ import {
     normalizeEmail,
     validateRegistration,
     validateProfile,
+    validateAccountUpdate,
+    validatePasswordChange,
     validId,
     fail
 } from "./identityValidation.js";
@@ -43,8 +45,8 @@ function publicAdvisor(profile) {
 
     const populatedUser =
         data.userId &&
-        typeof data.userId === "object" &&
-        data.userId.name
+            typeof data.userId === "object" &&
+            data.userId.name
             ? data.userId
             : null;
 
@@ -66,7 +68,8 @@ function publicAdvisor(profile) {
 function signToken(user) {
     return jwt.sign(
         {
-            role: user.role
+            role: user.role,
+            tokenVersion: user.tokenVersion ?? 0
         },
         config.JWT_SECRET,
         {
@@ -80,6 +83,141 @@ function signToken(user) {
 }
 
 export const identityService = {
+    async updateOwnAccount(data, auth) {
+        if (!auth?.userId) {
+            fail(
+                "Authentication required.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
+
+        const input = validateAccountUpdate(data);
+
+        const user = await repository.findUserById(
+            auth.userId,
+            true
+        );
+
+        if (!user || !user.isActive) {
+            fail(
+                "Account unavailable.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
+
+        if (input.changes.email !== undefined) {
+            const valid = await verifyPassword(
+                input.currentPassword,
+                user.passwordHash
+            );
+
+            if (!valid) {
+                fail(
+                    "Current password is incorrect.",
+                    401,
+                    "INVALID_CREDENTIALS"
+                );
+            }
+
+            const existing = await repository.findUserByEmail(
+                input.changes.email
+            );
+
+            if (
+                existing &&
+                String(existing._id) !== auth.userId
+            ) {
+                fail(
+                    "Email already registered.",
+                    409,
+                    "DUPLICATE_EMAIL"
+                );
+            }
+        }
+
+        const updated = await repository.updateOwnAccount(
+            auth.userId,
+            input.changes,
+            input.changes.email !== undefined
+                ? user.passwordHash
+                : undefined
+        );
+
+        if (!updated) {
+            fail(
+                "Account changed or is unavailable.",
+                409,
+                "ACCOUNT_UPDATE_CONFLICT"
+            );
+        }
+
+        return {
+            user: publicUser(updated),
+            advisorId: auth.advisorId ?? null
+        };
+    },
+
+    async changePassword(data, auth) {
+        if (!auth?.userId) {
+            fail(
+                "Authentication required.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
+
+        const input = validatePasswordChange(data);
+
+        const user = await repository.findUserById(
+            auth.userId,
+            true
+        );
+
+        if (!user || !user.isActive) {
+            fail(
+                "Account unavailable.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
+
+        const valid = await verifyPassword(
+            input.currentPassword,
+            user.passwordHash
+        );
+
+        if (!valid) {
+            fail(
+                "Current password is incorrect.",
+                401,
+                "INVALID_CREDENTIALS"
+            );
+        }
+
+        const newHash = await hashPassword(
+            input.newPassword
+        );
+
+        const updated = await repository.changePassword(
+            auth.userId,
+            user.passwordHash,
+            newHash
+        );
+
+        if (!updated) {
+            fail(
+                "Password changed by another request.",
+                409,
+                "PASSWORD_UPDATE_CONFLICT"
+            );
+        }
+
+        return {
+            message: "Password changed successfully. Sign in again."
+        };
+    },
     async register(data = {}) {
         const input = validateRegistration(data);
 
@@ -143,10 +281,12 @@ export const identityService = {
             typeof data !== "object" ||
             Array.isArray(data) ||
             typeof data.email !== "string" ||
-            typeof data.password !== "string"
+            typeof data.password !== "string" ||
+            data.password.length === 0 ||
+            Buffer.byteLength(data.password) > 1024
         ) {
             fail(
-                "Email and password are required.",
+                "Valid email and password are required.",
                 400
             );
         }
