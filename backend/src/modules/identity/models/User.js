@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { ROLES } from "../identityConstants.js";
 
 const userSchema = new mongoose.Schema(
     {
@@ -24,28 +25,45 @@ const userSchema = new mongoose.Schema(
             required: true,
             select: false
         },
-
+        tokenVersion: {
+            type: Number,
+            default: 0,
+            min: 0,
+            required: true,
+            select: false
+        },
         role: {
             type: String,
-            enum: [
-                "ADMIN",
-                "ADVISOR",
-                "MARKETING_SPECIALIST"
-            ],
-            required: true
+            enum: Object.values(ROLES),
+            required: true,
+            immutable: true
         },
 
         isActive: {
             type: Boolean,
-            default: true
+            default: true,
+            required: true
         }
     },
     {
         timestamps: true,
-        collection: "users"
+        collection: "users",
+        versionKey: false,
+        toJSON: {
+            virtuals: true,
+            transform(doc, ret) {
+                delete ret.passwordHash;
+                delete ret.__v;
+                delete ret.tokenVersion;
+                return ret;
+            }
+        }
     }
 );
 
-userSchema.index({ email: 1 }, { unique: true });
+userSchema.index(
+    { email: 1 },
+    { unique: true }
+);
 
 export default mongoose.model("User", userSchema);

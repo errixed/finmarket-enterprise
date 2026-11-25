@@ -1,49 +1,50 @@
 import mongoose from "mongoose";
+import { ASSIGNMENT_STATUSES } from "../identityConstants.js";
 
-const advisorSpecialistAssignmentSchema =
-    new mongoose.Schema(
-        {
-            advisorId: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: "AdvisorProfile",
-                required: true
-            },
-
-            specialistUserId: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: "User",
-                required: true
-            },
-
-            status: {
-                type: String,
-                enum: [
-                    "PENDING",
-                    "ACCEPTED",
-                    "DECLINED",
-                    "REVOKED"
-                ],
-                default: "PENDING",
-                required: true
-            },
-
-            acceptedAt: {
-                type: Date,
-                default: null
-            },
-
-            revokedAt: {
-                type: Date,
-                default: null
-            }
+const assignmentSchema = new mongoose.Schema(
+    {
+        advisorId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "AdvisorProfile",
+            required: true,
+            immutable: true
         },
-        {
-            timestamps: true,
-            collection: "advisorSpecialistAssignments"
-        }
-    );
 
-advisorSpecialistAssignmentSchema.index(
+        specialistUserId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+            immutable: true
+        },
+
+        status: {
+            type: String,
+            enum: Object.values(ASSIGNMENT_STATUSES),
+            default: ASSIGNMENT_STATUSES.PENDING,
+            required: true
+        },
+
+        acceptedAt: {
+            type: Date,
+            default: null
+        },
+
+        revokedAt: {
+            type: Date,
+            default: null
+        }
+    },
+    {
+        timestamps: true,
+        collection: "advisorSpecialistAssignments",
+        versionKey: false,
+        toJSON: {
+            virtuals: true
+        }
+    }
+);
+
+assignmentSchema.index(
     {
         advisorId: 1,
         specialistUserId: 1
@@ -52,23 +53,26 @@ advisorSpecialistAssignmentSchema.index(
         unique: true,
         partialFilterExpression: {
             status: {
-                $in: ["PENDING", "ACCEPTED"]
+                $in: [
+                    ASSIGNMENT_STATUSES.PENDING,
+                    ASSIGNMENT_STATUSES.ACCEPTED
+                ]
             }
         }
     }
 );
 
-advisorSpecialistAssignmentSchema.index({
+assignmentSchema.index({
     specialistUserId: 1,
     status: 1
 });
 
-advisorSpecialistAssignmentSchema.index({
+assignmentSchema.index({
     advisorId: 1,
     status: 1
 });
 
 export default mongoose.model(
     "AdvisorSpecialistAssignment",
-    advisorSpecialistAssignmentSchema
+    assignmentSchema
 );

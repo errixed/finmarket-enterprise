@@ -381,20 +381,41 @@ export async function createLead({ advisorId, status = "NEW" }) {
 
     return String(lead._id);
 }
+export async function createDeliveryJob({
+    advisorId,
+    campaignId,
+    deliveryStatus = "PENDING"
+}) {
+    let lead = await Lead.findOne({
+        advisorId,
+        marketingConsent: true,
+        unsubscribedAt: null
+    }).lean();
 
-export async function createDeliveryJob({ advisorId, campaignId, deliveryStatus = "PENDING" }) {
+    if (!lead) {
+        const leadId = await createLead({
+            advisorId,
+            status: "NEW"
+        });
+
+        lead = await Lead.findById(leadId).lean();
+    }
+
     const job = await DeliveryJob.create({
         advisorId,
         campaignId,
+        leadId: lead._id,
         channel: "EMAIL",
-        recipientEmail: `${randomUUID()}@example.com`,
-        content: { subject: "Test", body: "Test body" },
+        recipientEmail: lead.email,
+        content: {
+            subject: "Test",
+            body: "Test body"
+        },
         deliveryStatus
     });
 
     return String(job._id);
 }
-
 export const randomObjectId = () => String(newId());
 
 // A ready-made body for POST /automations.

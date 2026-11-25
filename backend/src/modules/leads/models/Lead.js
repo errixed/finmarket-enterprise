@@ -90,6 +90,8 @@ const leadSchema = new mongoose.Schema(
 );
 
 leadSchema.index({ advisorId: 1, status: 1 });
+leadSchema.index({ advisorId: 1, source: 1, createdAt: -1 });
+leadSchema.index({ advisorId: 1, interest: 1 });
 leadSchema.index(
     { advisorId: 1, email: 1 },
     { unique: true }

@@ -3,10 +3,22 @@ import { test, before } from "node:test";
 import { createCampaignService } from "../../src/modules/campaigns/campaignService.js";
 import { randomUUID } from "node:crypto";
 import { identityService } from "../../src/modules/identity/identityService.js";
+import { after } from "node:test";
+
+import {
+    connectTestDatabase,
+    disconnectTestDatabase
+} from "../helpers/testDatabase.js";
+
+import initializeIdentityModels from "../../src/config/initialize-identity-models.js";
 
 let advisorId;
 
 before(async () => {
+    await connectTestDatabase("campaign_service");
+
+    await initializeIdentityModels();
+
     const result = await identityService.register({
         name: "Campaign Test Advisor",
         email: `campaign-${randomUUID()}@example.com`,
@@ -15,6 +27,10 @@ before(async () => {
     });
 
     advisorId = result.advisorProfile.id;
+});
+
+after(async () => {
+    await disconnectTestDatabase();
 });
 const campaignId = "507f1f77bcf86cd799439012";
 const templateId = "507f1f77bcf86cd799439013";
@@ -39,6 +55,7 @@ function makeCampaign(overrides = {}) {
 
 function makeRepository(overrides = {}) {
     const repository = {
+        findAdvisor: async (id) => String(id) === String(advisorId) ? { _id: advisorId } : null,
         createCampaign: async (data) => ({ _id: campaignId, ...data }),
         listCampaigns: async () => [],
         findCampaign: async () => makeCampaign(),

@@ -32,9 +32,9 @@ These challenges demonstrate the need for a centralized marketing automation and
 
 ### 2.2 Proposed Solution
 
-FinMarket-Enterprise will provide a centralized web application that allows financial advisory businesses to manage marketing activities through a single platform.
+FinMarket-Enterprise provides a centralized web application that allows financial advisory businesses to manage marketing activities through a single platform.
 
-The application will support:
+The application supports:
 
 1. **User and Advisor Management:** Create user accounts, manage advisor profiles, and assign access permissions.
 2. **Lead Management:** Register prospective clients, maintain contact information, and track lead status.
@@ -60,7 +60,7 @@ The primary objectives of FinMarket-Enterprise are to:
 
 ### 2.4 Target Users and Access Roles
 
-FinMarket-Enterprise will support three primary user roles.
+FinMarket-Enterprise supports three primary user roles.
 
 | User Role | Responsibilities |
 |---|---|
@@ -68,7 +68,7 @@ FinMarket-Enterprise will support three primary user roles.
 | Financial Advisor | Manage professional profiles, prospective clients, marketing campaigns, and consultation activities. |
 | Marketing Specialist | Prepare marketing campaigns, manage approved promotional content, schedule communications, and monitor campaign results. |
 
-Access permissions will be enforced by the backend rather than relying only on frontend restrictions.
+Access permissions are enforced by the backend rather than relying only on frontend restrictions.
 
 For example, a marketing specialist may be permitted to prepare campaign content but must not automatically receive permission to modify administrator accounts.
 
@@ -78,9 +78,9 @@ For example, a marketing specialist may be permitted to prepare campaign content
 
 This module manages user registration, authentication, roles, and financial advisor profiles.
 
-Financial advisors will be able to maintain professional information, including specialties and available consultation types.
+Financial advisors can maintain professional information, including specialties and available consultation types.
 
-Administrators will be responsible for managing user access and ensuring that restricted operations are available only to authorized users.
+Administrators are responsible for managing user access and ensuring that restricted operations are available only to authorized users.
 
 ### 3.2 Lead Management (CRM)
 
@@ -88,17 +88,17 @@ The Lead Management module provides a centralized system for organizing prospect
 
 A lead represents an individual who may be interested in receiving financial advisory services.
 
-The module will support creating, retrieving, updating, searching, and filtering lead records.
+The module supports creating, retrieving, updating, searching, and filtering lead records.
 
 Each lead may progress through the following lifecycle:
 
 **NEW → CONTACTED → CONSULTATION_REQUESTED → CONVERTED**
 
-Marketing consent will also be recorded to determine whether a lead is eligible to receive promotional emails.
+Marketing consent is also recorded to determine whether a lead is eligible to receive promotional emails.
 
 ### 3.3 Marketing Campaign Management
 
-Financial advisors and authorized marketing specialists will be able to create and manage marketing campaigns.
+Financial advisors and authorized marketing specialists can create and manage marketing campaigns.
 
 Supported marketing strategies may include:
 
@@ -109,29 +109,29 @@ Supported marketing strategies may include:
 - Consultation invitations.
 - Informational newsletters.
 
-Each campaign will contain relevant information such as its title, description, target audience, associated advisor, and status.
+Each campaign contains relevant information such as its title, description, target audience, associated advisor, and status.
 
-Reusable message templates will help maintain consistency across marketing communications.
+Reusable message templates help maintain consistency across marketing communications.
 
 ### 3.4 Email and Facebook Delivery
 
 This module is responsible for delivering marketing communications through supported channels.
 
-**Email marketing:** The platform will integrate Gmail SMTP using Nodemailer to send authorized marketing emails to eligible recipients. Email delivery will support basic queuing, rate limiting, and delivery tracking.
+**Email marketing:** The platform supports Gmail SMTP using Nodemailer to send authorized marketing emails to eligible recipients. Email delivery supports basic queuing, rate limiting, and delivery tracking.
 
-**Facebook marketing:** The platform will use the Meta Graph API to publish text-based promotional posts to authorized Facebook Pages, subject to the necessary access permissions and approval.
+**Facebook marketing:** The platform supports the Meta Graph API to publish text-based promotional posts to authorized Facebook Pages, subject to the necessary access permissions and approval.
 
-Delivery records will allow authorized users to review successful and failed marketing operations.
+Delivery records allow authorized users to review successful and failed marketing operations.
 
 ### 3.5 Marketing Automation and Analytics
 
-The Marketing Automation module will execute predefined actions when supported business events occur.
+The Marketing Automation module executes predefined actions when supported business events occur.
 
 For example, when a new lead is registered, an automation rule may schedule a welcome email.
 
 When a prospective client requests a consultation, another rule may schedule a follow-up notification.
 
-The analytics functionality will summarize relevant business information, including:
+The analytics functionality summarizes relevant business information, including:
 
 - Number of registered leads.
 - Number of active campaigns.
@@ -141,586 +141,514 @@ The analytics functionality will summarize relevant business information, includ
 
 ## 4. Business Workflows
 
-### 4.1 User Authentication Workflow
+### 4.1 Identity and authentication
 
-1. A user creates an account.
-2. The backend validates the registration information.
-3. In Phase I, the backend hashes passwords using Node.js `scrypt` and stores records temporarily in memory.
-4. The user signs in using valid credentials.
-5. **Planned for Phase II:** the backend issues JWTs, protects sensitive API routes, and enforces role-based access using trusted server-side identity. Phase I login does not issue a JWT.
+1. An Advisor or Marketing Specialist registers with a unique email. Passwords are hashed using Node.js `scrypt`; Advisor registration creates the user and profile in one MongoDB transaction.
+2. Login validates credentials and account activity and returns a signed HS256 JWT. Protected requests send `Authorization: Bearer <token>`.
+3. The shared middleware verifies signature, expiry, issuer, audience, account activity and token version, and resolves the Advisor profile from the authenticated user.
+4. All roles can maintain their own account. Changing a password invalidates existing tokens; changing an email requires the current password.
+5. Administrators are provisioned through a trusted CLI, not public registration. They can inspect permissions and deactivate/reactivate accounts; deactivation invalidates previous JWTs.
 
-### 4.2 Marketing Campaign Workflow
+### 4.2 Advisor and specialist collaboration
 
-1. An authorized advisor creates a marketing campaign.
-2. The advisor enters the campaign title, description, marketing strategy, and target audience.
-3. The backend validates the submitted information.
-4. In Phase I, the campaign is saved in the in-memory repository; MongoDB persistence is planned for Phase II.
-5. The advisor selects the communication channel.
-6. The Phase I delivery module queues eligible jobs and simulates sending through a mock provider. Real Gmail/Facebook integrations are planned for later phases, subject to permissions.
-7. The system records the delivery or publishing results.
+An Advisor invites an active Marketing Specialist by user ID or email. The intended Specialist accepts or declines the pending invitation. Accepted relationships permit subsequent campaign assignment by the owning Advisor. The Specialist must have both an accepted relationship and a campaign assignment to access restricted campaign resources. The Advisor or Administrator can revoke an accepted relationship; revocation removes relationship-based access without deleting history.
 
-### 4.3 Lead Management Workflow
+### 4.3 Lead and campaign workflow
 
-1. An advisor registers a prospective client.
-2. The backend validates the lead information.
-3. The lead is assigned the initial status `NEW`.
-4. The advisor contacts the lead and updates its status to `CONTACTED`.
-5. If the lead requests a consultation, the status changes to `CONSULTATION_REQUESTED`.
-6. When the lead successfully becomes a client, the status changes to `CONVERTED`.
+1. The authenticated Advisor creates a Lead; ownership is derived from the JWT. Lead status progresses `NEW → CONTACTED → CONSULTATION_REQUESTED → CONVERTED`.
+2. Marketing consent is recorded explicitly. Withdrawal records an unsubscribe timestamp; re-consent clears it.
+3. The Advisor creates a channel-specific reusable template and campaign, defining the strategy and audience.
+4. Campaign activation validates the template and eligible recipients. Specialists assigned to a campaign can edit only permitted content fields and cannot independently activate campaigns.
+5. Authorized callers queue deliveries for an active campaign. Eligibility and consent are checked again when processing; results and attempts are persisted.
 
-The backend validates status changes to prevent unsupported values and unauthorized modifications.
+### 4.4 Automation and analytics
 
-### 4.4 Marketing Automation Workflow
-
-1. A business event occurs, such as the registration of a new lead.
-2. The application identifies automation rules associated with the event.
-3. The backend verifies that the rule is enabled and its conditions are satisfied.
-4. In Phase I, the system **simulates** the configured action. Actual scheduling and execution are planned for later phases.
-5. For email marketing, recipient consent must be verified before sending.
-6. The application records the automation result.
-7. The analytics module uses recorded activity to generate performance summaries.
+Business events are recorded with unique event IDs. Enabled rules match supported triggers and create durable execution records. Due executions are claimed atomically; delayed follow-ups survive restarts. Email actions queue work through Delivery, not directly through SMTP. HTTP simulation produces simulated executions without sending messages. Analytics aggregate persisted business and automation data within the caller's authorized scope.
 
 ## 5. Business Rules and Data Requirements
 
-The completed application must enforce the following proposed business rules:
-
-1. User registration requires valid information, and passwords must be securely hashed.
-2. Access to protected resources requires successful authentication.
-3. Users may perform only operations permitted by their roles.
-4. A lead must contain valid required contact information.
-5. Marketing emails must not be sent to recipients without the required marketing consent or to recipients who have unsubscribed.
-6. Campaigns must contain valid required information before they can be activated.
-7. Marketing delivery results must be recorded for tracking and reporting.
-8. Automation rules must execute only when their configured conditions are satisfied.
-9. Invalid requests must produce structured error responses.
-10. Data changes must be stored persistently using MongoDB.
-
-The application will use MongoDB collections to store related business information.
-
-The proposed initial collections are:
-
-| Collection | Purpose |
-|---|---|
-| `users` | User accounts, credentials, and roles |
-| `advisorProfiles` | Financial advisor profiles and specialties |
-| `leads` | Prospective client information and acquisition status |
-| `campaigns` | Marketing campaign information |
-| `templates` | Reusable marketing message templates |
-| `deliveryJobs` | Email and Facebook publishing jobs and results |
-| `automationRules` | Marketing automation triggers and actions |
-| `activityEvents` | Business events used for automation and analytics |
-
-Relationships between these collections will allow the system to associate leads, campaigns, and marketing activities with the appropriate users and advisors.
+- Normalized unique account emails; password hashes and token versions are not exposed in public user responses.
+- Trusted identity and server-side authorization govern ownership; client-supplied IDs cannot grant access.
+- Fixed role permissions are defined in code. Administration can inspect effective permissions but does not offer arbitrary runtime role/permission editing.
+- Lead email uniqueness is scoped to each Advisor; consent is checked at audience selection, delivery queueing and dispatch.
+- Campaign ownership cannot be changed through the API. State transitions, template ownership and channel compatibility are validated.
+- Delivery jobs use atomic claims, explicit failure retries and optional idempotency keys. Automation prevents duplicate events and executions using unique indexes.
+- MongoDB stores all business records persistently. Validation failures return structured errors; health checks report database availability.
 
 ## 6. Technology Stack
 
 | Component | Technology |
 |---|---|
-| Backend runtime | Node.js |
-| Backend framework | Express.js |
-| Programming language | JavaScript (ES6 modules) |
-| Frontend | React (planned for Phase III) |
-| Database | MongoDB (Phase II); temporary in-memory repositories in Phase I |
-| Database modeling | Mongoose |
-| Authentication | Phase I: scrypt password hashing and mock-session login; Phase II: JWT and backend authorization |
-| Email integration | Phase I mock provider; Gmail SMTP planned for later phase |
-| Facebook integration | Phase I mock provider; Meta Graph API integration planned subject to permissions |
-| API testing | Postman |
+| Backend | Node.js 22+, Express 5, ES modules |
+| Database | MongoDB 7, single-node replica set `rs0`, Mongoose 9 |
+| Security | Node.js scrypt, jsonwebtoken (HS256), Helmet, CORS |
+| Delivery | Mock providers by default; Nodemailer Gmail SMTP and Meta Graph API adapters |
+| Infrastructure | Docker Compose, NGINX 1.29 Alpine, named MongoDB volume |
+| Testing | Node.js `node:test`, Postman, GitHub Actions |
+| Frontend | React 19 / Vite scaffold; full integration is Phase III |
 | Version control | Git and GitHub |
-| Package manager | npm |
 
-The backend follows a layered architecture:
-
-**Phase I: Route → Controller → Service → In-memory Repository (with Mongoose schema validation)**  
-**Phase II target: Route → Controller → Service → MongoDB-backed Repository → Mongoose → MongoDB**
-
-This separation allows each component to focus on a specific responsibility and makes development, testing, and maintenance more manageable.
+Backend layering: Route → authentication/authorization → Controller → Service → Repository → Mongoose Model → MongoDB. Cross-module services and adapters coordinate business operations. The backend runs as a non-root container user.
 
 ## 7. Project Development Phases
 
-The project will be completed in three phases according to the course specification.
-
-### Phase I — Backend Foundation
-
-- Business case definition.
-- Backend project setup.
-- Core API routes.
-- Initial data models.
-- GitHub repository initialization.
-
-**Objective:** Establish the backend foundation and define the structure required for future implementation.
-
-### Phase II — Database and Security Integration
-
-- MongoDB integration using Mongoose.
-- Authentication and authorization implementation.
-- Role-based access enforcement.
-- Secure data handling.
-
-**Objective:** Integrate persistent data storage and enforce security and business rules through the backend.
-
-### Phase III — Frontend Integration and Deployment
-
-- React frontend integration.
-- Full-stack connectivity.
-- Deployment to a hosting platform.
-- Production environment configuration.
-
-**Objective:** Deliver an integrated, functional, and deployed full-stack application.
-
-## 8. Team Responsibilities
-
-Development is divided into five business modules so team members can work independently while following shared API contracts and architectural conventions.
-
-| Member | Assigned Module | Primary Responsibility |
+| Phase | Scope | Current status |
 |---|---|---|
-| Member 1 | Identity and Advisors | User accounts, authentication, roles, and advisor profiles |
-| Member 2 | Lead Management | Prospective clients, lead lifecycle, and CRM |
-| Member 3 | Marketing Campaigns | Campaign creation, marketing strategies, and templates |
-| Member 4 | Marketing Delivery | Gmail SMTP, Facebook Page publishing, and delivery tracking |
-| Member 5 | Automation and Analytics | Event-driven automation, follow-ups, and reporting |
+| I | Business case, schemas, initial in-memory APIs | Historical foundation |
+| II | Persistent database, JWT, role/ownership checks, collaboration, delivery and automation | Implemented in current backend |
+| III | Integrated React UI and deployment | Future work; frontend scaffold exists |
 
-Each member is responsible for the backend functionality, database integration, frontend components, and testing associated with their assigned module as the project progresses.
+## 8. Team Responsibilities and Infrastructure
 
-Shared components will be coordinated to maintain consistent integration between modules.
+| Member | Module | Responsibility |
+|---|---|---|
+| 1 | Identity and Advisors | Shared infrastructure, authentication, account management, roles, Advisor profiles and relationships |
+| 2 | Lead Management | CRM, lifecycle, consent, owner-scoped lead queries |
+| 3 | Marketing Campaigns | Campaigns, templates, audiences, specialist assignments |
+| 4 | Marketing Delivery | Queue, providers, eligibility, processing and history |
+| 5 | Automation and Analytics | Events, rules, durable executions, follow-ups and analytics |
 
-## 8.1 Infrastructure
+### 8.1 Infrastructure
 
-The Phase II development environment uses Docker Compose with four services:
+```text
+Client / Postman
+       |
+       v
+NGINX :8080 (host) -> :80 (container)
+       |
+       v
+Express backend :3001 (internal)
+       |
+       v
+MongoDB :27017 (internal) -> mongodb_data
+          replica set rs0
+```
 
-- `nginx`: Reverse proxy for API requests.
-- `backend`: Node.js and Express API.
-- `mongodb`: MongoDB 7 with persistent storage.
-- `mongo-init`: Initializes the single-node MongoDB replica set.
+The current `docker-compose.yml` contains only `nginx`, `backend` and `mongodb`. MongoDB's health check initializes `rs0` if necessary and waits until the node becomes writable. There is no separate `mongo-init` service. Backend startup waits for MongoDB health; NGINX waits for backend health. The MongoDB port is not published to the host. The frontend is not served by this Compose stack.
 
-The React frontend is not part of the Phase II Docker environment.
+### 8.2 First-time setup
 
-## 8.2 Setup
+Prerequisites: Git, Docker Desktop or Docker Engine with Compose v2; Postman for HTTP tests. Node.js 22+ is needed only for running Node commands outside Docker.
 
-From the project root:
+Clone the repository using its GitHub URL (repository access is required), enter the project root, then:
 
 ```bash
 cp .env.example .env
+openssl rand -hex 32
 ```
 
-On Windows, use PowerShell for the `cp` command or use `Copy-Item`.
+On PowerShell use `Copy-Item .env.example .env`; generate a cryptographically random secret using an available secure generator. Put the generated secret into `.env` as `JWT_SECRET` (at least 32 bytes). Keep the default MongoDB replica-set URI and mock delivery providers for local tests.
 
-Replace `JWT_SECRET` with a strong local secret.
+| Variable | Local setting / purpose |
+|---|---|
+| `NODE_ENV` | `development` |
+| `PORT` | `3001` (Compose fixes backend port at 3001) |
+| `NGINX_PORT` | `8080` (host-facing port) |
+| `CORS_ORIGIN` | `http://localhost:8080` |
+| `MONGO_URI` | `mongodb://mongodb:27017/finmarket_enterprise?replicaSet=rs0` |
+| `JWT_SECRET` | Generate a new secret; never commit it |
+| `JWT_EXPIRES_IN` | `1h` |
+| `JWT_ISSUER` | `finmarket-enterprise` |
+| `JWT_AUDIENCE` | `finmarket-api` |
+| `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | CLI provisioning inputs; default demo email `admin@example.com`, demo password `Password123!` |
+| `DELIVERY_EMAIL_PROVIDER` | `mock` or `gmail` |
+| `DELIVERY_FACEBOOK_PROVIDER` | `mock` or `meta` |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Required for real Gmail mode |
+| `META_PAGE_ID`, `META_ACCESS_TOKEN` | Required for real Meta mode |
 
-Start the application:
+The example Administrator password is for disposable local demonstration only. Use different strong credentials elsewhere. Keep `.env` out of Git; `.env.example` is the shareable configuration template.
 
 ```bash
-docker compose up --build -d
-```
-
-Verify:
-
-```bash
+docker compose up -d --build
 docker compose ps -a
 curl http://localhost:8080/api/v1/health
 ```
 
-API base URL:
+Expected: three running healthy services and HTTP 200 with `data.database` equal to `CONNECTED`. The first startup can take longer while the replica set is elected.
 
-`http://localhost:8080/api/v1`
+### 8.3 Provision the Administrator (once per database)
 
-## 8.3 MongoDB
-
-Database: `finmarket_enterprise`
-
-Internal connection:
-
-`mongodb://mongodb:27017/finmarket_enterprise?replicaSet=rs0`
-
-For MongoDB Compass on the host machine:
-
-`mongodb://localhost:27017/?directConnection=true`
-
-The Compass connection is limited to the local machine through the loopback port binding. MongoDB authentication is not configured for this local development environment.
-
-## 8.4 Database Ownership
-
-- Member 1: `users`, `advisorProfiles`, `advisorSpecialistAssignments`
-- Member 2: `leads`
-- Member 3: `campaigns`, `templates`
-- Member 4: `deliveryJobs`
-- Member 5: `automationRules`, `activityEvents`
-
-Each module must implement its own Mongoose models, repositories, validation, and persistence tests using the shared Mongoose connection.
-
-## 8.5 Identifier Conventions
-
-- `userId`: `User._id`
-- `advisorId`: `AdvisorProfile._id`
-- `specialistUserId`: `User._id`
-- `ownerId`: `User._id` where specified
-- `campaignId`: `Campaign._id`
-- `leadId`: `Lead._id`
-- `templateId`: `Template._id`
-- `deliveryJobId`: `DeliveryJob._id`
-- `automationRuleId`: `AutomationRule._id`
-
-Mongoose references alone do not enforce the existence of related records. Backend services must validate references and ownership.
-
-## 8.6 Security Integration
-
-Member 1 will implement shared JWT Bearer authentication and authorization.
-
-Planned shared interfaces:
-
-- `authenticate`
-- `authorizeRoles`
-- `requireActiveUser`
-
-The authenticated request context will provide `userId`, `role`, and `advisorId` when applicable.
-
-Other members may use test fixtures or mock authentication contexts for independent development until the shared middleware is available.
-
-JWT and authorization functionality must not be represented as completed at the infrastructure stage.
-
-## 8.7 Development Responsibilities
-
-Shared infrastructure configuration is maintained by Member 1.
-
-Other members should avoid modifying Docker Compose, shared database configuration, or global route registration without coordination.
-
-Feature-specific implementations belong in the assigned modules.
-
-## 8.8 Validation
-
-Run model validation separately:
+The Compose backend does not automatically import `ADMIN_*` into the service environment. Pass these variables explicitly. The following values match the bundled local demo collection:
 
 ```bash
-cd backend
-npm run validate:models
+docker compose exec \
+  -e ADMIN_NAME="Platform Administrator" \
+  -e ADMIN_EMAIL="admin@example.com" \
+  -e ADMIN_PASSWORD='Password123!' \
+  backend npm run admin:provision
 ```
 
-Backend startup uses:
+Expected: `Administrator account provisioned.` The script requires a password of at least 12 characters, validates the email, hashes the password, and rejects an existing email without modifying the account. For a non-demo account supply a different password privately. Changing `.env` or Postman variables does not update a stored password; use `PATCH /auth/me/password` while authenticated. Never provision an Administrator through `/auth/register`.
+
+### 8.4 MongoDB access and persistence
 
 ```bash
-npm start
+docker compose exec mongodb mongosh --quiet --eval 'db.hello().isWritablePrimary'
+docker compose exec mongodb mongosh finmarket_enterprise
 ```
 
-## 8.9 Shutdown
+Expected first output: `true`. In the shell use `show collections` and `db.leads.find().limit(5)`. MongoDB Compass cannot connect directly via a host port in the default Compose configuration. Database authentication and TLS are not configured for this local isolated development stack.
 
-Stop containers while retaining MongoDB data:
+### 8.5 Running outside Docker (optional)
+
+Use an independently running reachable MongoDB replica set and export the configuration variables in the shell (Node's current scripts do not automatically load the root `.env`). Use a URI reachable from the host, not the Docker service hostname. From `backend/`, run `npm ci`, then `npm start` or `npm run dev`. The default direct API port is 3001. This path is not required for the Docker setup.
+
+### 8.6 Shutdown, rebuild and troubleshooting
 
 ```bash
+docker compose logs --tail=100 backend
+docker compose logs --tail=100 mongodb
 docker compose down
+docker compose up -d --build
 ```
 
-Rebuild:
+`down` retains the named database volume. Do not use `down -v` unless intentionally deleting all local database records. If port 8080 is occupied, change `NGINX_PORT`, adjust `CORS_ORIGIN` and Postman's `baseUrl`. A 503 health response indicates database unavailability. A 401 Administrator login after changing `.env` usually means the stored credentials differ; verify the actual account before changing any data.
 
-```bash
-docker compose up --build -d
-```
+### 8.7 Shared identity and identifier contracts
 
-Do not use `docker compose down -v` unless permanent deletion of the MongoDB volume is intended.
+`authenticate`, `authorizeRoles`, `authorizePermissions`, `requireActiveUser` and Advisor ownership checks are implemented in shared middleware. `req.auth`/`req.user` contains trusted `userId`, `role`, `advisorId` (when applicable), name and email. `authorizationService` resolves active accepted relationships. `userId`, `specialistUserId` and automation `ownerId` identify `User._id`; `advisorId` identifies `AdvisorProfile._id`. `campaignId`, `leadId`, `templateId`, `deliveryJobId` and `automationRuleId` identify their respective documents. An invitation/relationship ID identifies an `AdvisorSpecialistAssignment`; it is not a user or campaign ID. `eventId` is a deduplication string, not the ActivityEvent ObjectId.
+
 ## 9. Project Scope and Limitations
 
-FinMarket-Enterprise is an educational project intended to demonstrate full-stack web development, marketing automation, database management, security, and third-party API integration.
+The platform is an educational marketing and client-acquisition backend, not a financial transaction system, portfolio manager or investment recommendation engine. Use fictional or explicitly authorized data. Mock delivery does not prove real-world sending. Real Gmail/Meta operation requires credentials, external permissions and provider compliance. Production deployment, public database security, frontend integration and production-scale worker operations are outside the verified local setup.
 
-The system will use fictional or explicitly authorized demonstration data.
+The Automation worker is started by `server.js`; the Delivery worker implementation exists, but the current server entry point does not start it. Use the explicit delivery processing endpoint for demonstrations. Do not assume a queued or scheduled delivery is automatically sent, or that a scheduled campaign automatically changes status when its date arrives.
 
-The application will not process financial transactions, provide automated investment recommendations, or manage real investment portfolios.
+## 10. Persistent Data Models
 
-Email marketing functionality will respect provider sending restrictions and applicable consent requirements.
-
-Facebook integration will be limited to supported operations available through authorized Meta API permissions.
-
-External service integrations may initially use mock implementations while real credentials, permissions, or provider approvals are unavailable.
-
-## 10. Initial Data Models
-
-FinMarket-Enterprise uses Mongoose schemas to define the structure, validation rules, and relationships of its MongoDB collections.
-
-The initial database design contains eight collections:
-
-| Model | Purpose | Relationships |
+| Collection | Model | Main data / references |
 |---|---|---|
-| User | Authentication and role management | Referenced by AdvisorProfile and AutomationRule |
-| AdvisorProfile | Financial advisor information | References User |
-| Lead | Prospect and client acquisition management | References AdvisorProfile |
-| Campaign | Marketing campaign management | References AdvisorProfile and optionally Template |
-| Template | Reusable email and Facebook marketing content | References AdvisorProfile |
-| DeliveryJob | Email delivery and Facebook publishing tracking | References Campaign and optionally Lead |
-| AutomationRule | Rule-based marketing automation | References User and optionally Campaign |
-| ActivityEvent | Business event history and analytics | Identifies related entities through entityType and entityId |
+| `users` | User | name, email (unique), passwordHash, role, isActive, tokenVersion |
+| `advisorProfiles` | AdvisorProfile | unique userId, specialties, consultationTypes, bio, isPublic |
+| `advisorSpecialistAssignments` | AdvisorSpecialistAssignment | advisorId, specialistUserId, status, acceptedAt, revokedAt; unique active pair |
+| `leads` | Lead | advisorId, contact data, interest, status, source, consent and unsubscribe timestamps; unique advisor/email |
+| `campaigns` | Campaign | advisorId, title, description, strategy, channel, audience, templateId, assignedSpecialistIds, status, schedule/completion |
+| `templates` | Template | advisorId, name, channel, subject, body, isActive |
+| `deliveryJobs` | DeliveryJob | campaign/advisor/lead/user references, content, status, provider, schedule, attempts, result/error, idempotency key |
+| `automationRules` | AutomationRule | ownerId, campaignId, name, trigger/action, delay, enabled, actionConfig, specialist toggle, execution counters |
+| `activityEvents` | ActivityEvent | unique eventId, event/entity type and ID, ownerId, campaignId, metadata, source, processing status |
+| `automationExecutions` | AutomationExecution | eventId, rule ID, unique event/rule pair, schedule, status, attempts, lease, result/error |
 
-Each model defines appropriate field types, required values, defaults, and validation constraints. Relevant fields also have indexes to support future database queries.
+Model definitions are under `backend/src/modules/*/models/`. References are validated in services; an ObjectId alone does not establish that a related record exists or is accessible.
 
-The models are maintained in the `models/` directory of their respective backend modules.
+## 11. Authorization Matrix
 
-**Phase I:** Define the Mongoose schemas and test their initial validation behavior.
+A = Administrator (`ADMIN`), F = Financial Advisor (`ADVISOR`), S = Marketing Specialist (`MARKETING_SPECIALIST`). A dash means no access through that operation; all protected access requires an active authenticated account.
 
-**Phase II:** Integrate the schemas with MongoDB, implement persistent storage, enforce relationships, and apply backend security and authorization rules.
+| Operation | A | F | S |
+|---|---|---|---|
+| Public directory/login | Public | Public | Public |
+| Public registration | Not allowed for ADMIN | Yes | Yes |
+| Own account/password | Own | Own | Own |
+| Advisor profile edit | — | Own | — |
+| Invite/revoke Advisor relationship | Admin revoke via admin API | Own | — |
+| Accept/decline invitation | — | — | Own invitation |
+| List invitations/accepted relationships | Admin relationship review | Own | Own |
+| Admin user/status/permissions | Yes | — | — |
+| Leads | — | Own | — |
+| Create campaign/template | — | Own | — |
+| Read campaign/template | — | Own | Assigned + accepted relationship |
+| Update campaign | — | Own, validated fields | Assigned; title, description, audience, permitted template only |
+| Preview audience | — | Owned recipients and count | Assigned count only |
+| Manage campaign specialist assignments | — | Own | — |
+| Queue/process/retry delivery | — | Own | Assigned + accepted relationship |
+| Read delivery | All | Own | Assigned + accepted relationship |
+| Create automation/simulate | — | Own | — |
+| Read automation/events/executions | All | Own | Assigned campaign scope |
+| Update automation | — | Own | Enabled toggle only if explicitly allowed |
+| Analytics summary | Platform | Own | Assigned campaign scope; no private leads |
 
-## 11. Expected Project Outcome
+Fixed permission codes (`identityConstants.js`):
 
-The completed FinMarket-Enterprise platform should demonstrate how a financial advisory business can manage prospective clients, organize campaigns, automate marketing communications, and monitor client acquisition activities through one centralized web application.
+- ADMIN: `MANAGE_OWN_ACCOUNT`, `MANAGE_USERS`, `MANAGE_PERMISSIONS`, `MANAGE_PLATFORM`, `REVIEW_ASSIGNMENTS`.
+- ADVISOR: `MANAGE_OWN_ACCOUNT`, `MANAGE_OWN_PROFILE`, `MANAGE_OWN_LEADS`, `MANAGE_OWN_CAMPAIGNS`, `MANAGE_OWN_DELIVERIES`, `MANAGE_OWN_AUTOMATIONS`, `INVITE_SPECIALISTS`, `REVOKE_OWN_ASSIGNMENTS`.
+- MARKETING_SPECIALIST: `MANAGE_OWN_ACCOUNT`, `RESPOND_TO_INVITATIONS`, `VIEW_ASSIGNED_CAMPAIGNS`, `MANAGE_PERMITTED_DELIVERIES`.
 
-The primary measure of success will be a functional end-to-end business workflow in which an advisor creates a campaign, selects eligible leads, initiates an authorized marketing action, records the result, and reviews the corresponding activity through the application.
+Feature-specific service checks also apply. Administrator access is not a universal bypass.
 
-The project will also demonstrate RESTful API design, data relationships, secure authentication, backend-enforced authorization, frontend integration, and deployment.
+## 12. Business Specifications
 
-## 12. Campaign Management API and Business Rules
+### 12.1 Identity
 
-The Campaigns module supports campaign creation, retrieval, updates, reusable marketing templates, and audience selection. During Phase I, campaigns and templates are stored temporarily in memory using JavaScript Maps. Mongoose schemas provide data validation without requiring a MongoDB connection.
+Registration: name 2–100 characters, valid normalized email (maximum 254), password at least 8 characters and maximum 1024 bytes, role `ADVISOR` or `MARKETING_SPECIALIST`. Only Advisors may supply `profile` (`specialties`, `consultationTypes`, `bio`, `isPublic`); consultation types are `ONLINE`, `IN_PERSON`, `PHONE`; bio maximum 1000 characters. Public directory exposes only active public profiles. Account updates accept name/email and require currentPassword for email changes; password updates require currentPassword and a different newPassword. Relationship statuses: `PENDING → ACCEPTED/DECLINED`, `ACCEPTED → REVOKED`. Duplicate pending/accepted pairs are rejected. Admin cannot deactivate itself. Inactive users have no effective permissions.
 
-All campaign operations are scoped to an advisor using `advisorId`. During Phase I, this identifier is provided explicitly through the request body or query parameters. Backend-enforced authentication and authorization will be implemented in Phase II.
+### 12.2 Leads
 
-### 12.1 API Endpoints
+Required fields: name (2–100), email (max 254), interest (max 150). Optional phone (max 30), notes (max 2000), status, source (`WEBSITE`, `FACEBOOK`, `MANUAL`, `OTHER`), marketingConsent (boolean, default false). Default status `NEW`, source `MANUAL`. Status changes cannot skip stages or move backward; same-status updates are allowed. Server owns consent timestamps. `advisorId` compatibility input must match the authenticated profile. List defaults page 1, limit 20, max 100.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/v1/campaigns` | Create a campaign |
-| GET | `/api/v1/campaigns` | List campaigns |
-| GET | `/api/v1/campaigns/:campaignId` | Retrieve a specific campaign |
-| PATCH | `/api/v1/campaigns/:campaignId` | Update campaign information or status |
-| GET | `/api/v1/campaigns/:campaignId/audience` | Preview eligible campaign recipients |
-| POST | `/api/v1/campaigns/templates` | Create a reusable template |
-| GET | `/api/v1/campaigns/templates` | List active templates |
-| GET | `/api/v1/campaigns/templates/:templateId` | Retrieve a specific active template |
+### 12.3 Campaigns and templates
 
-GET and PATCH operations require an `advisorId` query parameter. POST requests accept the advisor ID in the JSON body.
+Campaign title 3–150, description max 2000, strategy `NEWSLETTER`, `RETIREMENT_PLANNING`, `INVESTMENT_EDUCATION`, `WEBINAR`, `CONSULTATION_OFFER`, `OTHER`; channel `EMAIL` or `FACEBOOK`. Audience is `{interests: string[], leadStatuses: string[]}`; empty arrays impose no filter. Template name 2–100, subject max 200, body required max 10000, isActive defaults true. Template channel must match campaign; subject defaults to an empty string (supply a meaningful subject for email). Campaign status defaults `DRAFT`.
 
-Successful responses follow the structure `{ "success": true, "data": ... }`. Errors use `{ "success": false, "error": { "code": "...", "message": "..." } }`.
-
-### 12.2 Campaign Strategies
-
-Supported campaign strategies include:
-
-- `NEWSLETTER`
-- `RETIREMENT_PLANNING`
-- `INVESTMENT_EDUCATION`
-- `WEBINAR`
-- `CONSULTATION_OFFER`
-- `OTHER`
-
-### 12.3 Campaign Status Transitions
-
-Campaigns follow a controlled lifecycle:
-
-| Current Status | Allowed Next Statuses |
+| Current | Allowed next |
 |---|---|
 | DRAFT | SCHEDULED, ACTIVE, CANCELLED |
 | SCHEDULED | DRAFT, ACTIVE, CANCELLED |
 | ACTIVE | COMPLETED, CANCELLED |
-| COMPLETED | None |
-| CANCELLED | None |
+| COMPLETED / CANCELLED | No further status transition |
 
-A scheduled campaign must have a future `scheduledAt` value.
+Same-status updates are permitted subject to validation. `SCHEDULED` requires a future `scheduledAt`; activation requires an owned active matching template and at least one consenting subscribed lead. Specialist assignment requires an active accepted relationship and does not replace it. Campaign updates use version checks to reject concurrent modifications.
 
-### 12.4 Business Rules
+### 12.4 Delivery
 
-1. Campaigns must belong to an existing advisor profile.
-2. Campaigns must reference an active template belonging to the same advisor before activation.
-3. The selected template channel must match the campaign channel.
-4. Campaign activation requires at least one eligible lead.
-5. Campaign audiences are filtered according to selected interests and lead statuses.
-6. Leads without marketing consent or with a recorded unsubscribe date are excluded.
-7. Campaign ownership cannot be modified through the standard update endpoint.
-8. Campaign and template records are retrieved using both their identifiers and the associated advisor ID.
+Channels `EMAIL` and `FACEBOOK`. Public queue body accepts `campaignId`, `channel`, `content`, optional matching `advisorId`, `leadId`, `recipientEmail`, `scheduledAt`, `idempotencyKey`. Email requires an eligible lead; content has `subject` and `body` as applicable. Facebook uses text body. Campaign must be active, channel matching, and caller authorized. Recipient address must match the lead; consent, unsubscribe state and audience membership are rechecked. Future jobs cannot be manually processed until due. Status lifecycle `PENDING → PROCESSING → SENT/FAILED`; `CANCELLED` exists in the model, and explicit retry returns eligible `FAILED` jobs to `PENDING` (up to three attempts). No public cancel endpoint. Atomic claims prevent concurrent double processing. Provider metadata distinguishes mock from actual delivery.
 
-### 12.5 Example — Create a Campaign
+Real-provider adapters and rate-limit/worker options are documented in `backend/src/modules/delivery/README.md` and source. Optional runtime environment variables such as `META_GRAPH_API_VERSION`, `DELIVERY_RATE_LIMIT_MAX`, `DELIVERY_RATE_LIMIT_WINDOW_MS`, `DELIVERY_MAX_CONCURRENT_SENDS`, `DELIVERY_WORKER_INTERVAL_MS` are not all forwarded by the current Compose file; add explicit environment mappings when using them. Keep mock providers for all automated tests.
 
-**Request:** `POST /api/v1/campaigns`
+### 12.5 Automation and analytics
+
+Rule creation requires `name`, `trigger`, `action`; optional `description`, `campaignId`, `delayMinutes` (integer 0–43200), `enabled` (default false), `actionConfig` (`subject`, `body`), `allowSpecialistToggle` (default false). `ownerId` is derived from JWT; supplied owner must match. Ownership cannot be changed.
+
+Triggers: `LEAD_CREATED`, `LEAD_STATUS_CHANGED`, `CONSULTATION_REQUESTED`, `CAMPAIGN_CREATED`, `CAMPAIGN_ACTIVATED`, `CAMPAIGN_COMPLETED`, `DELIVERY_QUEUED`, `DELIVERY_SENT`, `DELIVERY_FAILED`.
+
+Actions: `SEND_EMAIL`, `SCHEDULE_FOLLOW_UP`, `CREATE_NOTIFICATION`. Only lead triggers can use email-style actions; campaign/delivery triggers can only create notifications. Enabled email-style rules require a campaign. `AUTOMATION_EXECUTED` and `AUTOMATION_FAILED` are audit event types, not triggers. Entity types: `LEAD`, `CAMPAIGN`, `DELIVERY_JOB` (`DELIVERY` alias), `AUTOMATION_RULE`. Metadata rejects sensitive keys/values, unsafe object keys and oversized/deep objects.
+
+Events have unique `eventId`, source `SIMULATION` or `INTERNAL`, processing status `RECEIVED`, `PROCESSING`, `PROCESSED`, `FAILED`. Execution statuses: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `UNCERTAIN`, `SKIPPED`, `SIMULATED`. Atomic claims, idempotency and unique indexes prevent duplicate processing. Temporary execution failures may retry with backoff; uncertain outcomes are not retried automatically. The Automation worker defaults to 30-second polling. Optional runtime controls `AUTOMATION_WORKER_ENABLED`, `AUTOMATION_WORKER_INTERVAL_MS`, `AUTOMATION_SIMULATION_ENABLED` require explicit Compose environment forwarding when used. Simulation is restricted in production and never sends messages. Analytics report rule counts, event counts, simulated and actual execution outcomes, business lead/campaign/delivery metrics and conversion rate (converted / total × 100, zero when no leads). Specialists receive no private lead metrics.
+
+## 13. Complete Phase II REST API Documentation
+
+### 13.1 API conventions
+
+Base URL: `http://localhost:8080/api/v1`. All routes below are relative to this base. JSON requests require `Content-Type: application/json`. Use the JWT returned by login for protected requests. IDs are 24-character hexadecimal ObjectIds unless specified otherwise. Identity objects use `id`; many Mongoose-backed business objects expose `_id`. Use the actual returned value.
 
 ```json
-{
-  "advisorId": "507f1f77bcf86cd799439011",
-  "title": "Retirement Planning Campaign",
-  "description": "A practical introduction to retirement planning.",
-  "strategy": "RETIREMENT_PLANNING",
-  "channel": "EMAIL",
-  "audience": {
-    "interests": ["Retirement Planning"],
-    "leadStatuses": ["NEW", "CONTACTED"]
-  }
-}
+{"success":true,"data":{}}
 ```
 
-The example `advisorId` is illustrative. An actual advisor profile must exist in the Identity module before this request can succeed.
+```json
+{"success":false,"error":{"code":"INVALID_REQUEST","message":"Description","details":[]}}
+```
 
-A successful request returns HTTP `201 Created` with a generated campaign ID.
+List responses may include `count` or `pagination` (page, limit, total, totalPages). Health has its own `data.status`, `application`, `database`, `timestamp` shape even on 503. Common statuses: 200 success; 201 created; 400 invalid input/unsupported transition; 401 missing/invalid JWT or credentials; 403 insufficient access; 404 missing/inaccessible resource; 409 duplicates or conflicts; 413 oversized JSON; 500 unexpected failure; 503 unavailable service/database. Error codes and access-denial status depend on the module. Responses never intentionally expose credential secrets. Route tables show successful status; validation and authorization failures remain possible.
 
-### 12.6 Phase I Limitations
+### 13.2 Health, Identity and Advisors (9 endpoints)
 
-Campaign and template records are stored in memory and are cleared whenever the backend process restarts.
-
-Mongoose models are retained for schema validation and future database integration. MongoDB persistence, JWT authentication, and backend role-based authorization are planned for Phase II.
-
-## 13. Full Phase I REST API Documentation
-
-### 13.1 General API conventions
-
-- **Base URL:** `http://localhost:3001/api/v1` (or your configured `PORT`).
-- **Requests:** `Content-Type: application/json` for JSON bodies.
-- **Successful response:** generally `{ "success": true, "data": ... }`. Some list routes additionally return `count`; the Leads list provides pagination metadata.
-- **Error response:** generally `{ "success": false, "error": { "code": "...", "message": "..." } }`; some validation paths may use a generic error code. Use the response status and message as well as any error code.
-- **Common statuses:** `200` success, `201` created, `400` invalid request, `401` failed login, `403` forbidden by a business rule, `404` missing record, `409` conflict/invalid transition, `500` unexpected failure.
-- **IDs:** MongoDB ObjectId-shaped 24-character hexadecimal strings. Create referenced records first; illustrative IDs alone are not sufficient.
-- **Phase I trust boundary:** advisors/owners are provided in request bodies or query strings. These are **not authenticated claims**. Do not describe Phase I APIs as security-protected; trusted identity, JWT, and enforced roles belong to Phase II.
-
-### 13.2 Health and Identity & Advisors
-
-| Method | Route | Inputs | Behavior / result |
-|---|---|---|---|
-| GET | `/health` | None | Health/status and timestamp; `200` |
-| POST | `/auth/register` | JSON: `name`, `email`, `password`, `role`; optional `profile` | Creates user and, for advisor role, profile; `201`. Rejects duplicates/invalid input. |
-| POST | `/auth/login` | JSON: `email`, `password` | Verifies credentials; `200`, or `401` on invalid credentials. **Does not issue JWT in Phase I.** |
-| GET | `/advisors` | None | Public advisor directory; `200` |
-| GET | `/advisors/:id` | URL: advisor ID | Advisor details; `200` or `404` |
-| PATCH | `/advisors/:id` | JSON: supported profile fields such as `specialties`, `consultationTypes`, `bio`, `isPublic` | Updates advisor profile; `200`; rejects unsupported values or protected identity fields. |
+| Method | Route | Access | Input / result | Success |
+|---|---|---|---|---|
+| GET | `/health` | Public | Database readiness and timestamp | 200 |
+| POST | `/auth/register` | Public | name, email, password, role, optional Advisor profile; returns user and advisorProfile | 201 |
+| POST | `/auth/login` | Public | email, password; returns user, token, tokenType and expiresIn | 200 |
+| GET | `/auth/me` | All roles | Current user and advisorId | 200 |
+| PATCH | `/auth/me` | All roles | name/email, currentPassword for email; updated account | 200 |
+| PATCH | `/auth/me/password` | All roles | currentPassword, newPassword; sign in again afterward | 200 |
+| GET | `/advisors` | Public | Active public directory | 200 |
+| GET | `/advisors/:id` | Public | Public Advisor profile ID | 200 |
+| PATCH | `/advisors/:id` | Advisor owner | specialties, consultationTypes, bio, isPublic | 200 |
 
 Example registration:
 
-```http
-POST /api/v1/auth/register
-Content-Type: application/json
-```
-
 ```json
-{
-  "name": "Demo Advisor",
-  "email": "demo-advisor@example.com",
-  "password": "ExamplePass123!",
-  "role": "ADVISOR"
-}
+{"name":"Demo Advisor","email":"advisor@example.com","password":"ExamplePass123!","role":"ADVISOR","profile":{"specialties":["Retirement Planning"],"consultationTypes":["ONLINE"],"bio":"Financial planning","isPublic":true}}
 ```
 
-Save the returned **advisor profile ID** for Leads, Campaigns, and Delivery; save the returned **user ID** separately for Automation `ownerId`. The two identifiers are not interchangeable.
+Example login: `{"email":"advisor@example.com","password":"ExamplePass123!"}`. Save `data.token` and `data.user.id`; retrieve `data.advisorId` from `GET /auth/me` or `data.advisorProfile.id` from registration. For account updates send e.g. `{"name":"Updated Advisor"}`; password update: `{"currentPassword":"ExamplePass123!","newPassword":"NewExamplePass123!"}`.
 
-### 13.3 Leads CRM
+### 13.3 Invitations and relationships (6 endpoints)
 
-| Method | Route | Inputs | Behavior / result |
+| Method | Route | Access | Input / result | Success |
+|---|---|---|---|---|
+| POST | `/advisor-invitations` | Advisor | specialistUserId or specialistEmail; pending invitation | 201 |
+| GET | `/advisor-invitations` | Advisor / Specialist | Own invitations | 200 |
+| POST | `/advisor-invitations/:id/accept` | Invited Specialist | Invitation ID; accepted relationship | 200 |
+| POST | `/advisor-invitations/:id/decline` | Invited Specialist | Invitation ID; declined relationship | 200 |
+| GET | `/advisor-assignments` | Advisor / Specialist | Own accepted relationships | 200 |
+| DELETE | `/advisor-assignments/:id` | Owning Advisor | Accepted relationship ID; revoke, not hard delete | 200 |
+
+Example invite: `{"specialistEmail":"specialist@example.com"}`. Register the Specialist first. Use the returned relationship ID in accept/decline/revoke calls; no JSON payload is needed for those operations.
+
+### 13.4 Administration (7 endpoints)
+
+All require Administrator JWT and the corresponding fixed platform permission.
+
+| Method | Route | Input / result | Success |
 |---|---|---|---|
-| POST | `/leads` | JSON: `advisorId`, `name`, `email`, `interest`; optional `phone`, `status`, `marketingConsent`, `source`, `notes` | Creates a lead; `201`. Advisor must exist. Default marketing consent is false. |
-| GET | `/leads` | Optional query: `advisorId`, `status`, `marketingConsent`, `source`, `interest`, `search`, `page`, `limit` | Filter/search/paginate; `200`. `page` starts at 1 and `limit` is at most 100. |
-| GET | `/leads/:id` | Lead ID | Retrieve record; `200` or `404` |
-| PATCH | `/leads/:id` | JSON: supported editable lead fields | Update and validate lead, tracking consent withdrawal; `200` |
+| GET | `/admin/users` | List accounts | 200 |
+| GET | `/admin/users/:id` | User ID; account details | 200 |
+| PATCH | `/admin/users/:id/status` | User ID, `{"isActive":false}` or true | 200 |
+| GET | `/admin/assignments` | Review relationship records | 200 |
+| DELETE | `/admin/assignments/:id` | Revoke accepted relationship by ID | 200 |
+| GET | `/admin/roles` | Role/permission definitions | 200 |
+| GET | `/admin/users/:id/permissions` | Effective permission list for user | 200 |
 
-Example:
+Admin provisioning is a CLI operation (Section 8.3), not an HTTP endpoint. There are no public hard-delete user, role-edit or password-reset administration routes.
 
-```json
-{
-  "advisorId": "<existing-advisor-profile-id>",
-  "name": "Jane Example",
-  "email": "jane@example.com",
-  "interest": "Retirement Planning",
-  "status": "NEW",
-  "marketingConsent": true,
-  "source": "MANUAL"
-}
-```
+### 13.5 Leads CRM (4 endpoints)
 
-Use the actual ID returned by registration rather than the placeholder above. Lead email duplicates are checked within an advisor's records, and consent withdrawal prevents pending email deliveries from being processed.
+All require owning Advisor JWT. Optional `advisorId` is compatibility-only and must match.
 
-### 13.4 Campaigns and reusable templates
-
-| Method | Route | Inputs | Behavior / result |
+| Method | Route | Input / result | Success |
 |---|---|---|---|
-| POST | `/campaigns` | JSON: `advisorId`, `title`, `strategy`, `channel`; optional `description`, `audience`, `templateId`, scheduling fields | Create draft campaign; `201` |
-| GET | `/campaigns` | Required `advisorId`; optional `status` | List advisor-owned campaigns; `200` |
-| GET | `/campaigns/:campaignId` | Required query `advisorId` | Retrieve campaign; `200` |
-| PATCH | `/campaigns/:campaignId` | Required query `advisorId`; JSON changes including status | Update fields or transition state; `200` |
-| GET | `/campaigns/:campaignId/audience` | Required query `advisorId` | Preview matching consenting, subscribed leads; `200` |
-| POST | `/campaigns/templates` | JSON: `advisorId`, `name`, `channel`, `body`; `subject` as applicable | Create reusable template; `201` |
-| GET | `/campaigns/templates` | Required `advisorId`; optional `channel` | List active templates; `200` |
-| GET | `/campaigns/templates/:templateId` | Required query `advisorId` | Retrieve owned active template; `200` |
-
-Campaign `strategy`: `NEWSLETTER`, `RETIREMENT_PLANNING`, `INVESTMENT_EDUCATION`, `WEBINAR`, `CONSULTATION_OFFER`, `OTHER`. Lifecycle: `DRAFT → SCHEDULED/ACTIVE/CANCELLED`; `SCHEDULED → DRAFT/ACTIVE/CANCELLED`; `ACTIVE → COMPLETED/CANCELLED`; completed and cancelled states are terminal. Activation requires an appropriate active template belonging to the advisor and at least one consenting eligible lead. For full examples and business rules see Section 12.
-
-### 13.5 Marketing Delivery (mock provider)
-
-| Method | Route | Inputs | Behavior / result |
-|---|---|---|---|
-| POST | `/deliveries` | JSON: `advisorId`, `campaignId`, `channel`, `content`; email jobs additionally require `leadId`; optional `recipientEmail`, `scheduledAt` | Validate and queue simulated job; `201`, status `PENDING` |
-| GET | `/deliveries` | Optional filters `campaignId`, `deliveryStatus` | Delivery history; `200` |
-| POST | `/deliveries/:id/process` | URL job ID, empty body | Explicitly process due PENDING job through mock provider; `200`, status `SENT` or `FAILED` |
-
-Example email job (IDs must refer to an existing **ACTIVE** campaign and one of its eligible leads):
+| POST | `/leads` | name, email, interest; optional phone, status, marketingConsent, source, notes, advisorId | 201 |
+| GET | `/leads` | Query: advisorId, status, marketingConsent, source, interest, search, page, limit | 200 |
+| GET | `/leads/:id` | Owned Lead ID | 200 |
+| PATCH | `/leads/:id` | Editable contact/lifecycle/consent fields | 200 |
 
 ```json
-{
-  "advisorId": "<existing-advisor-profile-id>",
-  "campaignId": "<existing-active-campaign-id>",
-  "leadId": "<existing-consenting-lead-id>",
-  "channel": "EMAIL",
-  "content": {
-    "subject": "Planning Your Retirement",
-    "body": "Find out more about our retirement planning consultation."
-  }
-}
+{"name":"Jane Example","email":"jane@example.com","interest":"Retirement Planning","marketingConsent":true,"source":"MANUAL"}
 ```
 
-Delivery validates the campaign's owner and channel, audience membership, recipient agreement, and marketing consent. Queueing a job **does not send it**. Processing checks that it is due, rechecks relevant eligibility, and moves the job through `PENDING → PROCESSING → SENT/FAILED`. Duplicate pending jobs are rejected; already processed jobs cannot be processed again. `simulated: true` and a mock message ID are **not evidence of real-world email delivery or Facebook publication**. A 400 `ADVISOR_MISMATCH` may be returned for mismatched lead/campaign ownership.
+Example filter: `/leads?status=NEW&marketingConsent=true&page=1&limit=20`. Update consent with `{"marketingConsent":false}`; do not supply server-managed timestamps.
 
-### 13.6 Automation & Analytics (simulated)
+### 13.6 Campaigns and templates (11 endpoints)
 
-| Method | Route | Inputs | Behavior / result |
-|---|---|---|---|
-| POST | `/automations` | JSON: `ownerId`, `name`, `trigger`, `action`; optional `description`, `campaignId`, `delayMinutes`, `enabled` | Create automation rule; `201`. `ownerId` must reference an existing **user**. |
-| GET | `/automations` | Optional filters: `ownerId`, `trigger`, `action`, `enabled` | List matching rules; `200` |
-| POST | `/automations/simulate-event` | JSON: optional `eventId`, `eventType`, `entityType`, `entityId`, `ownerId`, `metadata` | Record an event and return **simulated** actions; `201`, or `409` for duplicate event ID |
-| GET | `/automations/events` | Optional filters: `eventType`, `ownerId`, `entityId` | List event history; `200` |
-| GET | `/analytics/summary` | None | Counts of rules, events, and simulated actions; `200` |
+F = owning Advisor; S = assigned Specialist with active accepted relationship. Admin has no Campaign API bypass.
 
-Example create rule:
+| Method | Route | Access | Input / result | Success |
+|---|---|---|---|---|
+| POST | `/campaigns/templates` | F | name, channel, body, subject as applicable, optional isActive/advisorId | 201 |
+| GET | `/campaigns/templates` | F/S | Optional channel, matching advisorId for F only; scoped active templates | 200 |
+| GET | `/campaigns/templates/:templateId` | F/S | Authorized active template | 200 |
+| POST | `/campaigns` | F | title, strategy, channel; optional description, audience, templateId, status, scheduledAt, advisorId | 201 |
+| GET | `/campaigns` | F/S | Optional status; matching advisorId for F only | 200 |
+| GET | `/campaigns/:campaignId` | F/S | Authorized campaign | 200 |
+| PATCH | `/campaigns/:campaignId` | F/S | F: title, description, strategy, channel, audience, templateId, status, scheduledAt; S: restricted content fields | 200 |
+| GET | `/campaigns/:campaignId/audience` | F/S | F: recipients/count; S: count only | 200 |
+| POST | `/campaigns/:campaignId/specialists` | F | specialistUserId; assign accepted Specialist | 201 |
+| GET | `/campaigns/:campaignId/specialists` | F | Assigned user IDs and names | 200 |
+| DELETE | `/campaigns/:campaignId/specialists/:userId` | F | Remove Specialist from campaign | 200 |
+
+Template example:
 
 ```json
-{
-  "ownerId": "<existing-user-id>",
-  "name": "Welcome newly registered leads",
-  "trigger": "LEAD_CREATED",
-  "action": "SEND_EMAIL",
-  "enabled": true,
-  "delayMinutes": 0
-}
+{"name":"Retirement Email","channel":"EMAIL","subject":"Plan your retirement","body":"Book a consultation to learn more."}
 ```
 
-Example simulated event:
+Campaign example (replace ID with actual returned template ID):
 
 ```json
-{
-  "eventId": "demo-event-001",
-  "eventType": "LEAD_CREATED",
-  "entityType": "LEAD",
-  "entityId": "<existing-lead-id>",
-  "ownerId": "<existing-user-id>",
-  "metadata": {}
-}
+{"title":"Retirement Planning Campaign","strategy":"RETIREMENT_PLANNING","channel":"EMAIL","templateId":"<templateId>","audience":{"interests":["Retirement Planning"],"leadStatuses":["NEW","CONTACTED"]}}
 ```
 
-`eventId` must be unique for each simulated execution. Automation actions are **not automatically connected to real email sending** in Phase I. Full trigger execution, scheduling and persistent event processing are future-phase goals. Schema enum values for triggers/actions and event types are defined in `backend/src/modules/automation/models/` and should be consulted when extending the API.
+Activate with `{"status":"ACTIVE"}` using PATCH. Assign with `{"specialistUserId":"<userId>"}`. Advisor IDs are derived from trusted authentication; no owner query is required for campaign details or updates.
 
-### 13.7 Recommended end-to-end demonstration
+### 13.7 Delivery (5 endpoints)
 
-1. Register an ADVISOR; save its user ID and advisor profile ID.
-2. Create a consenting Lead for the advisor.
-3. Create an EMAIL template and a draft Campaign referencing that template with an audience matching the lead.
-4. Activate the Campaign and preview its audience.
-5. Queue an EMAIL delivery; verify `PENDING`, then call `/deliveries/:id/process` and verify `SENT` with `simulated: true`.
-6. Create an Automation rule using the user ID, simulate a `LEAD_CREATED` event, then retrieve events and `/analytics/summary`.
-7. Withdraw the lead's marketing consent and confirm that new email delivery/processing attempts are blocked.
+F = owning Advisor; S = assigned Specialist with active accepted relationship; A = Administrator read-only.
 
-These are **Phase I demonstration flows**, not claims of real-world sending, authenticated authorization, or persisted data.
+| Method | Route | Access | Input / result | Success |
+|---|---|---|---|---|
+| POST | `/deliveries` | F/S | Queue validated job; see Section 12.4 | 201 |
+| GET | `/deliveries` | F/S/A | Scoped filtered/paginated job history | 200 |
+| GET | `/deliveries/:id` | F/S/A | Authorized DeliveryJob ID | 200 |
+| POST | `/deliveries/:id/process` | F/S | Due pending job, no body required | 200 |
+| POST | `/deliveries/:id/retry` | F/S | Eligible failed job, no body required | 200 |
 
-## 14. Project Status, Verification, and Planned Work
+History filters: `campaignId`, `leadId`, `channel`, `deliveryStatus`, `provider`, `advisorId` (Admin or matching Advisor only), `createdFrom`, `createdTo`, `scheduledFrom`, `scheduledTo`, `page`, `limit` (maximum 100).
 
-| Area | Phase I status | Next work |
-|---|---|---|
-| Express API and five feature modules | Implemented and locally tested | Broader regression/quality checks |
-| Mongoose schema definitions | Present; used for validation | MongoDB storage, indexes and migrations |
-| Identity | In-memory users/profiles, scrypt password hashing, login validation | JWT issuance, authorization middleware, role enforcement |
-| Leads | In-memory CRUD, filtering, status and consent rules | Persistent CRM and access controls |
-| Campaigns/Templates | In-memory CRUD, status transitions, audience previews | Persistent campaigns, authenticated ownership |
-| Delivery | In-memory queue and explicit mock processing | Reliable queue/retries, authorized SMTP/Meta APIs |
-| Automation/Analytics | Rules, events, simulated actions and counts | Durable triggers, scheduling and execution |
-| Frontend | Planned for Phase III; not required for Phase I | Full React integration and security-aware screens |
-| Deployment | Local development only | Hosting, production configuration and verification |
+```json
+{"campaignId":"<activeCampaignId>","leadId":"<eligibleLeadId>","channel":"EMAIL","content":{"subject":"Retirement Planning","body":"Learn about our consultations."}}
+```
 
-**Verification evidence (latest provided):** 55/55 Node tests passed on October 15, 2026. The initial 157-request Postman collection run reported 601/603 passing assertions in approximately 2.5 seconds, with two expected-error mismatches for a single foreign-lead delivery scenario. The collection has since been corrected, but a full rerun of the corrected collection is not yet independently confirmed. Avoid stating that all Postman tests passed without the corrected run output.
+Facebook example: `{"campaignId":"<activeFacebookCampaignId>","channel":"FACEBOOK","content":{"body":"Join our upcoming webinar."}}`. Queueing does not send; process the returned job ID explicitly. A successful processing HTTP response can contain a `FAILED` job; inspect the job's deliveryStatus and provider result. Mock `SENT` is a simulated result only.
+
+### 13.8 Automation and Analytics (8 endpoints)
+
+F = owning Advisor; S = assigned campaign Specialist with accepted relationship; A = read-only Administrator.
+
+| Method | Route | Access | Input / result | Success |
+|---|---|---|---|---|
+| POST | `/automations` | F | Rule fields, Section 12.5 | 201 |
+| GET | `/automations` | F/S/A | Scoped filtered rules | 200 |
+| GET | `/automations/:id` | F/S/A | Rule ObjectId | 200 |
+| PATCH | `/automations/:id` | F/S | F: rule fields except owner; S: enabled only if permitted | 200 |
+| POST | `/automations/simulate-event` | F | JSON object; eventId, eventType, entityType, entityId, ownerId, metadata are optional/defaulted as applicable; simulation result | 201 |
+| GET | `/automations/events` | F/S/A | Scoped events | 200 |
+| GET | `/automations/executions` | F/S/A | Scoped executions | 200 |
+| GET | `/analytics/summary` | F/S/A | Scoped aggregate summary | 200 |
+
+Rules filters: `ownerId`, `campaignId`, `trigger`, `action`, `enabled`, `page`, `limit`. Events filters: `ownerId`, `campaignId`, `entityId`, `eventType`, `entityType`, `processingStatus`, `source`, `from`, `to`, `page`, `limit`. Executions filters: `ownerId`, `campaignId`, `automationRuleId`, `eventId`, `status`, `action`, `simulated`, `from`, `to`, `page`, `limit`. Defaults page 1/limit 20, maximum 100. Unknown/repeated query fields are rejected. Dates use ISO format.
+
+Rule example:
+
+```json
+{"name":"Welcome new leads","trigger":"LEAD_CREATED","action":"SEND_EMAIL","campaignId":"<activeEmailCampaignId>","enabled":true,"delayMinutes":0,"actionConfig":{"subject":"Welcome","body":"Thank you for your interest."}}
+```
+
+Simulation example:
+
+```json
+{"eventId":"demo-event-001","eventType":"LEAD_CREATED","entityType":"LEAD","entityId":"<ownedLeadId>","metadata":{}}
+```
+
+For default Phase I-compatible simulation send `{}` as a JSON body, not a missing body. The response includes `event` and `simulatedActions`; duplicate event IDs conflict. The trusted `publishEvent` integration is an in-process API, not a public route. Analytics returns separate simulated/executed action statistics and business metrics.
+
+### 13.9 End-to-end demonstration
+
+Register/login Advisor and Specialist; invite and accept; create consenting lead; create template and draft campaign; assign Specialist; activate campaign and preview audience; queue and process mock delivery; create rule and simulate event; inspect events/executions and analytics; withdraw consent and verify delivery restrictions; revoke relationship and verify Specialist access is removed. Use separate JWTs and actual IDs throughout.
+
+**Total: 50 HTTP method/path combinations**, including health. See the bundled complete Postman collection for concrete request bodies and assertions across all routes.
+
+## 14. Testing, Verification and Planned Work
+
+### 14.1 Run automated backend tests
+
+Start the Docker stack first. All database-backed tests must use disposable test databases, never the application database. The following command supplies the three test URIs and mock delivery settings; suite helpers create isolated databases and clean them up. Use a test-only JWT secret.
+
+```bash
+docker compose exec \
+  -e NODE_ENV=test \
+  -e MONGO_URI='mongodb://mongodb:27017/finmarket_test?replicaSet=rs0' \
+  -e DELIVERY_TEST_MONGO_URI='mongodb://mongodb:27017/finmarket_delivery_test?replicaSet=rs0' \
+  -e CAMPAIGN_TEST_MONGO_URI='mongodb://mongodb:27017/finmarket_campaign_test?replicaSet=rs0' \
+  -e JWT_SECRET='local-test-only-secret-at-least-32-bytes' \
+  -e DELIVERY_EMAIL_PROVIDER=mock \
+  -e DELIVERY_FACEBOOK_PROVIDER=mock \
+  backend npm test
+```
+
+To run a specific module, keep the same environment arguments and replace `npm test` with one of the following:
+
+| Command | Purpose |
+|---|---|
+| `npm run test:identity` | Identity, account security, relationships, admin and infrastructure |
+| `npm run test:leads` | Lead ownership, consent, validation, persistence |
+| `npm run test:campaigns` | Campaigns, templates, state and assignments |
+| `npm run test:delivery` | Delivery eligibility, jobs, providers, processing and retry |
+| `npm run test:automation` | Rules, events, execution, scheduling, analytics |
+| `npm run test:integration` | Cross-module behavior |
+| `npm run test:all` | All tests serially |
+
+Model validation:
+
+```bash
+docker compose exec backend npm run validate:models
+```
+
+For saving a run report, append `2>&1 | tee backend-test-results.txt` to the test command on macOS/Linux (inspect the test summary; a pipeline may mask the test exit status unless pipefail is enabled).
+
+### 14.2 Run Postman tests
+
+1. Start Docker and verify health (Section 8.2).
+2. Provision the Administrator once (Section 8.3) and confirm login returns 200.
+3. Ensure both delivery providers are `mock` in `.env`; recreate backend if changing the runtime environment.
+4. Import `postman/complete.postman_collection.json` into Postman. This is the current consolidated Phase II collection; the other collections in that directory are historical or module-specific.
+5. Choose **No Environment**. In collection Variables, confirm `baseUrl` is `http://localhost:8080/api/v1`, `adminEmail` is `admin@example.com`, and `adminPassword` matches the provisioned local account (bundled demo default `Password123!`). Save. Do not export real credentials.
+6. Click **Run collection**, select all folders in their original order and run one iteration. Do not randomize requests or run dependent requests in parallel. Generated identities, tokens and IDs are handled by the collection's scripts.
+7. Review the assertion totals and export the JSON run report if required. A failed setup request can cause multiple dependent failures; inspect the first failure before changing backend code.
+
+The collection contains 241 requests across eight top-level folders: setup, Identity, relationships, Leads, Campaigns, Delivery, Automation/Analytics, and Administration. It tests positive and negative scenarios against 50 HTTP endpoints. It creates persistent test data in the configured development database; use a disposable database for repeated demonstrations. No manual seeding of ordinary test accounts is required. Provisioning is the only required manual account setup.
+
+### 14.3 Infrastructure verification
+
+Confirm `docker compose ps -a` shows three healthy services. Check replica set readiness, health endpoint, and data persistence after `docker compose down` followed by `docker compose up -d`. For a controlled outage test, stop MongoDB, inspect `/health` and logs, then restart MongoDB and confirm recovery. Perform destructive/fresh-volume tests using a separate disposable Compose project/database. Never delete the working volume to fix a test assertion.
+
+### 14.4 Continuous integration
+
+`.github/workflows/ci.yaml` installs dependencies, initializes a MongoDB replica set for backend tests, validates models, runs automated tests, checks frontend build tasks where present, validates/builds Docker Compose and runs dependency audit checks. Local Postman execution is a separate verification activity. CI build validation is not equivalent to a live deployment or runtime health test.
+
+### 14.5 Current status and verification evidence
+
+| Area | Phase II status |
+|---|---|
+| Infrastructure | Three-service Compose, persistent MongoDB replica set, readiness and graceful shutdown |
+| Identity | JWT, account self-service, token invalidation, fixed roles, administration and relationships |
+| Leads | Persistent owner-scoped CRM, consent and lifecycle |
+| Campaigns | Persistent campaigns/templates, scoped assignment and audience selection |
+| Delivery | Persistent queue, mock/real provider adapters, explicit processing and retries |
+| Automation | Durable events/rules/executions, running Automation worker, scoped analytics |
+| Frontend and production deployment | Phase III work |
+
+The team reported a successful complete Postman run using the corrected V3 collection after configuring the Administrator. The latest supplied source contains the complete collection and automated suites. No fresh Node test execution or independent final all-pass export is included in this README revision; record actual final run totals from the execution environment rather than treating historical Phase I results as Phase II evidence.
 
 ## 15. ChatGPT Use Acknowledgement
 
@@ -730,7 +658,3 @@ OpenAI ChatGPT was used as a development and documentation assistance tool durin
 2. **Postman collection generation:** ChatGPT generated a consolidated Phase I Postman collection with 157 API requests and automated response assertions. It also revised two assertions after a test run showed that the backend returned `400 ADVISOR_MISMATCH` for a cross-advisor Delivery scenario instead of the initially expected `404 CAMPAIGN_NOT_FOUND`.
 3. **Automated test generation:** ChatGPT generated or helped revise Node.js `node:test` unit and cross-module integration tests covering Identity, Leads, Campaigns, Delivery, Automation, and business-rule validations. The latest local test run reported 55 of 55 passing tests.
 4. **Code review and debugging assistance:** ChatGPT helped identify inconsistencies across modules, improve input and ownership checks, review status transitions and simulated delivery processing, and interpret test failures. Suggested modifications were incorporated into the working implementation by the development team.
-
-**Human responsibility:** Team members are responsible for reviewing, understanding, adapting, implementing, and validating all generated content and code. ChatGPT suggestions are not a substitute for source-code review, executable testing, or demonstration of individual understanding. This acknowledgement describes assistance rather than assigning project authorship to ChatGPT; final submitted work and contributions must comply with the course's academic integrity requirements.
-
-**Project reference documents:** *Project Specification Document* and *FinMarket-Enterprise Team Project Guide* (provided with the project).
