@@ -17,6 +17,7 @@ import {
 import initializeIdentityModels from "../../src/config/initialize-identity-models.js";
 
 import { identityService } from "../../src/modules/identity/identityService.js";
+import { identityRepository } from "../../src/modules/identity/identityRepository.js";
 
 import * as leads from "../../src/modules/leads/leadService.js";
 
@@ -56,6 +57,12 @@ async function createTestLead(
     advisorId,
     consent = true
 ) {
+    const profile = await identityRepository.findAdvisorById(advisorId);
+    const actor = {
+        userId: String(profile.userId),
+        advisorId: String(profile._id),
+        role: "ADVISOR"
+    };
     const lead = await leads.createLead({
         advisorId,
         name: "Integration Test Lead",
@@ -64,7 +71,7 @@ async function createTestLead(
         status: "NEW",
         marketingConsent: consent,
         source: "MANUAL"
-    });
+    }, actor);
 
     assert.ok(lead);
 
@@ -375,6 +382,11 @@ test("Integration: withdrawing consent prevents processing", async () => {
         String(lead._id),
         {
             marketingConsent: false
+        },
+        {
+            userId: String((await identityRepository.findAdvisorById(advisorId)).userId),
+            advisorId: String(advisorId),
+            role: "ADVISOR"
         }
     );
 
