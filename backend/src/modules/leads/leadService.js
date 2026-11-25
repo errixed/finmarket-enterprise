@@ -1,162 +1,237 @@
+import mongoose from "mongoose";
+
 import Lead from "./models/Lead.js";
 import repository from "./leadRepository.js";
 import { identityRepository } from "../identity/identityRepository.js";
+import { ROLES } from "../identity/identityConstants.js";
+import AppError from "../../utils/AppError.js";
 
-const fields = ["advisorId", "name", "email", "phone", "interest", "status", "marketingConsent", "source", "notes"];
+const editableFields = [
+    "advisorId", "name", "email", "phone", "interest", "status",
+    "marketingConsent", "source", "notes"
+];
 const statuses = Lead.schema.path("status").enumValues;
 const sources = Lead.schema.path("source").enumValues;
+const objectIdPattern = /^[a-f\d]{24}$/i;
+const lifecycle = Object.freeze({
+    NEW: "CONTACTED",
+    CONTACTED: "CONSULTATION_REQUESTED",
+    CONSULTATION_REQUESTED: "CONVERTED",
+    CONVERTED: null
+});
 
-function fail(message, statusCode = 400) {
-    const error = new Error(message);
-    error.statusCode = statusCode;
-    throw error;
+function fail(message, statusCode = 400, code = "INVALID_REQUEST") {
+    throw new AppError(message, statusCode, code);
 }
 
-function requireUniqueEmail(advisorId, email, excludeId = null) {
-    const normalizedEmail = email.trim().toLowerCase();
-    const normalizedAdvisorId = String(advisorId).toLowerCase();
-
-    const duplicate = repository.findAll().some(lead =>
-        String(lead.advisorId).toLowerCase() === normalizedAdvisorId &&
-        lead.email.trim().toLowerCase() === normalizedEmail &&
-        String(lead._id) !== String(excludeId)
-    );
-
-    if (duplicate) {
-        fail("A lead with this email already exists for this advisor.", 409);
+function assertAdvisor(actor) {
+    if (!actor) fail("Authentication required.", 401, "UNAUTHORIZED");
+    if (actor.role !== ROLES.ADVISOR || !objectIdPattern.test(actor.advisorId ?? "")) {
+        fail("Only an authenticated advisor can manage private leads.", 403, "FORBIDDEN");
     }
+    return actor.advisorId.toLowerCase();
 }
 
-function validateInput(input, partial = false) {
-    if (!input || typeof input !== "object" || Array.isArray(input)) fail("Body must be a JSON object.");
+function validateBody(input, partial = false) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+        fail("Body must be a JSON object.");
+    }
+
     const keys = Object.keys(input);
-    if (partial && !keys.length) fail("Provide at least one field to update.");
+    if (partial && keys.length === 0) fail("Provide at least one field to update.");
+
     for (const key of keys) {
-        if (!fields.includes(key)) fail(`Unsupported field: ${key}.`);
+        if (!editableFields.includes(key)) fail(`Unsupported field: ${key}.`);
         if (key === "marketingConsent") {
             if (typeof input[key] !== "boolean") fail("marketingConsent must be a JSON boolean.");
         } else if (typeof input[key] !== "string") {
             fail(`${key} must be a string.`);
         }
     }
-    if (input.advisorId !== undefined && !/^[a-f0-9]{24}$/i.test(input.advisorId)) fail("advisorId must be a 24-character ObjectId.");
-    if (input.status !== undefined && !statuses.includes(input.status)) fail(`status must be one of: ${statuses.join(", ")}.`);
-}
 
-function validateDocument(document) {
-    const error = document.validateSync();
-    if (error) fail(Object.values(error.errors).map(item => item.message).join(" "));
-    return JSON.parse(JSON.stringify(document.toObject()));
-}
-
-function find(id) {
-    if (!/^[a-f0-9]{24}$/i.test(id)) fail("Lead id must be a 24-character ObjectId.");
-    const lead = repository.findById(id.toLowerCase());
-    if (!lead) fail("Lead not found.", 404);
-    return lead;
-}
-
-function requireExistingAdvisor(advisorId) {
-    if (!advisorId) {
-        fail("advisorId is required.");
-    }
-
-    if (!/^[a-f0-9]{24}$/i.test(advisorId)) {
+    if (input.advisorId !== undefined && !objectIdPattern.test(input.advisorId)) {
         fail("advisorId must be a 24-character ObjectId.");
     }
+    if (input.status !== undefined && !statuses.includes(input.status)) {
+        fail(`status must be one of: ${statuses.join(", ")}.`);
+    }
+    if (input.source !== undefined && !sources.includes(input.source)) {
+        fail(`source must be one of: ${sources.join(", ")}.`);
+    }
+}
 
-    const advisor = identityRepository.findAdvisorById(
-        advisorId.toLowerCase()
-    );
+function validateListQuery(query) {
+    const allowed = [
+        "advisorId", "status", "marketingConsent", "source", "interest",
+        "search", "page", "limit"
+    ];
 
-    if (!advisor) {
-        fail("Advisor not found.", 404);
+    for (const [key, value] of Object.entries(query)) {
+        if (!allowed.includes(key)) fail(`Unsupported filter: ${key}.`);
+        if (typeof value !== "string") fail(`${key} must be a single string value.`);
     }
 
-    return advisor;
+    if (query.status && !statuses.includes(query.status)) fail("Invalid status filter.");
+    if (query.source && !sources.includes(query.source)) fail("Invalid source filter.");
+    if (query.advisorId && !objectIdPattern.test(query.advisorId)) fail("Invalid advisorId filter.");
+    if (query.marketingConsent !== undefined && !["true", "false"].includes(query.marketingConsent)) {
+        fail("marketingConsent filter must be true or false.");
+    }
+
+    const integer = (key, fallback, maximum) => {
+        if (query[key] === undefined) return fallback;
+        if (!/^[1-9]\d*$/.test(query[key])) fail(`${key} must be a positive integer.`);
+        const value = Number(query[key]);
+        if (!Number.isSafeInteger(value) || value > maximum) {
+            fail(`${key} exceeds the allowed maximum ${maximum}.`);
+        }
+        return value;
+    };
+
+    return {
+        page: integer("page", 1, 1000000),
+        limit: integer("limit", 20, 100)
+    };
+}
+
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function requireOwnedAdvisor(actor, advisorId) {
+    const advisor = await identityRepository.findAdvisorById(advisorId);
+    if (!advisor) fail("Advisor profile not found.", 404, "NOT_FOUND");
+    if (String(advisor.userId) !== String(actor.userId)) {
+        fail("The advisor profile does not belong to the authenticated user.", 403, "FORBIDDEN");
+    }
+}
+
+async function requireUniqueEmail(advisorId, email, excludeId = null) {
+    const duplicate = await repository.findDuplicateContact(
+        advisorId,
+        email.trim().toLowerCase(),
+        excludeId
+    );
+
+    if (duplicate) {
+        fail("A lead with this email already exists for this advisor.", 409, "DUPLICATE_LEAD");
+    }
 }
 
 function recordConsent(document, input, now, previouslyConsented = false) {
     if (input.marketingConsent === true) {
-        if (!previouslyConsented) {
+        if (!previouslyConsented || !document.consentRecordedAt) {
             document.consentRecordedAt = now;
         }
-
         document.unsubscribedAt = null;
     } else if (input.marketingConsent === false && previouslyConsented) {
         document.unsubscribedAt = now;
     }
 }
 
-export function createLead(input) {
-    validateInput(input);
-    requireExistingAdvisor(input.advisorId);
+async function findOwnedLead(id, advisorId) {
+    if (!objectIdPattern.test(id ?? "")) {
+        fail("Lead id must be a 24-character ObjectId.");
+    }
+
+    const lead = await repository.findById(id.toLowerCase(), advisorId);
+    if (!lead) fail("Lead not found.", 404, "NOT_FOUND");
+    return lead;
+}
+
+export async function createLead(input, actor) {
+    const advisorId = assertAdvisor(actor);
+    validateBody(input);
+
+    if (input.advisorId && input.advisorId.toLowerCase() !== advisorId) {
+        fail("A lead must belong to the authenticated advisor.", 403, "FORBIDDEN");
+    }
+
+    await requireOwnedAdvisor(actor, advisorId);
     const now = new Date();
-    const document = new Lead({ ...input, createdAt: now, updatedAt: now });
+    const document = new Lead({ ...input, advisorId, createdAt: now, updatedAt: now });
     recordConsent(document, input, now);
-    const validated = validateDocument(document);
-    requireUniqueEmail(validated.advisorId, validated.email);
-    return repository.create(validated);
+
+    const validationError = document.validateSync();
+    if (validationError) {
+        fail(Object.values(validationError.errors).map(item => item.message).join(" "));
+    }
+
+    await requireUniqueEmail(advisorId, document.email);
+    return repository.create(document);
 }
 
-export function getLead(id) { return find(id); }
+export async function getLead(id, actor) {
+    const advisorId = assertAdvisor(actor);
+    return findOwnedLead(id, advisorId);
+}
 
-export function updateLead(id, input) {
-    const existing = find(id);
-    validateInput(input, true);
-    if (
-        input.advisorId !== undefined &&
-        input.advisorId.toLowerCase() !== existing.advisorId.toLowerCase()
-    ) {
-        fail("A lead cannot be reassigned to another advisor.");
+export async function updateLead(id, input, actor) {
+    const advisorId = assertAdvisor(actor);
+    validateBody(input, true);
+
+    const existing = await findOwnedLead(id, advisorId);
+    if (input.advisorId !== undefined && input.advisorId.toLowerCase() !== advisorId) {
+        fail("A lead cannot be reassigned to another advisor.", 403, "FORBIDDEN");
     }
+
+    if (input.status && input.status !== existing.status && lifecycle[existing.status] !== input.status) {
+        fail(`Invalid lifecycle transition from ${existing.status} to ${input.status}.`);
+    }
+
     const now = new Date();
-    const document = new Lead({ ...existing, ...input, updatedAt: now });
+    const document = new Lead({ ...existing, ...input, advisorId, updatedAt: now });
     recordConsent(document, input, now, existing.marketingConsent);
+    const validationError = document.validateSync();
+    if (validationError) {
+        fail(Object.values(validationError.errors).map(item => item.message).join(" "));
+    }
 
-    const validated = validateDocument(document);
+    await requireUniqueEmail(advisorId, document.email, existing._id);
+    const changes = {};
+    for (const key of editableFields) {
+        if (key !== "advisorId" && document[key] !== undefined) changes[key] = document[key];
+    }
+    changes.consentRecordedAt = document.consentRecordedAt;
+    changes.unsubscribedAt = document.unsubscribedAt;
 
-    requireUniqueEmail(
-        validated.advisorId,
-        validated.email,
-        existing._id
-    );
-
-    return repository.update(existing._id, validated);
+    const updated = await repository.update(existing._id, advisorId, changes);
+    if (!updated) fail("Lead not found.", 404, "NOT_FOUND");
+    return updated;
 }
 
-export function listLeads(query) {
-    const allowed = ["advisorId", "status", "marketingConsent", "source", "interest", "search", "page", "limit"];
-    for (const [key, value] of Object.entries(query)) {
-        if (!allowed.includes(key)) fail(`Unsupported filter: ${key}.`);
-        if (typeof value !== "string") fail(`${key} must be a single string value.`);
-    }
-    if (query.status && !statuses.includes(query.status)) fail("Invalid status filter.");
-    if (query.source && !sources.includes(query.source)) fail("Invalid source filter.");
-    if (query.advisorId && !/^[a-f0-9]{24}$/i.test(query.advisorId)) fail("Invalid advisorId filter.");
-    if (query.marketingConsent !== undefined && !["true", "false"].includes(query.marketingConsent)) fail("marketingConsent filter must be true or false.");
-    const integer = (key, fallback, max) => {
-        if (query[key] === undefined) return fallback;
-        if (!/^[1-9]\d*$/.test(query[key])) fail(`${key} must be a positive integer.`);
-        const value = Number(query[key]);
-        if (!Number.isSafeInteger(value) || value > max) fail(`${key} exceeds the allowed maximum ${max}.`);
-        return value;
-    };
-    const page = integer("page", 1, 1000000);
-    const limit = integer("limit", 20, 100);
-    let leads = repository.findAll();
-    if (query.advisorId) leads = leads.filter(x => x.advisorId === query.advisorId.toLowerCase());
-    if (query.status) leads = leads.filter(x => x.status === query.status);
-    if (query.source) leads = leads.filter(x => x.source === query.source);
-    if (query.marketingConsent !== undefined) leads = leads.filter(x => x.marketingConsent === (query.marketingConsent === "true"));
-    if (query.interest) {
-        const interest = query.interest.toLowerCase();
+export async function listLeads(query, actor) {
+    const advisorId = assertAdvisor(actor);
+    const { page, limit } = validateListQuery(query);
 
-        leads = leads.filter(lead =>
-            typeof lead.interest === "string" &&
-            lead.interest.toLowerCase().includes(interest)
-        );
+    if (query.advisorId && query.advisorId.toLowerCase() !== advisorId) {
+        fail("You cannot access another advisor's leads.", 403, "FORBIDDEN");
     }
-    if (query.search) leads = leads.filter(x => `${x.name} ${x.email}`.toLowerCase().includes(query.search.toLowerCase()));
-    return { data: leads.slice((page - 1) * limit, page * limit), pagination: { page, limit, total: leads.length, totalPages: Math.ceil(leads.length / limit) } };
+
+    const filters = {};
+    if (query.status) filters.status = query.status;
+    if (query.source) filters.source = query.source;
+    if (query.marketingConsent !== undefined) {
+        filters.marketingConsent = query.marketingConsent === "true";
+    }
+    if (query.interest) filters.interest = new RegExp(escapeRegex(query.interest), "i");
+    if (query.search) {
+        const pattern = new RegExp(escapeRegex(query.search), "i");
+        filters.$or = [{ name: pattern }, { email: pattern }];
+    }
+
+    return repository.findByAdvisor(advisorId, filters, { page, limit });
+}
+
+export async function findLeadForDelivery(leadId, advisorId) {
+    if (!mongoose.isValidObjectId(leadId) || !mongoose.isValidObjectId(advisorId)) return null;
+    return repository.findById(leadId, advisorId);
+}
+
+export async function findMarketingEligibleLeads(advisorId, filters = {}) {
+    if (!mongoose.isValidObjectId(advisorId)) return [];
+    const safeFilters = {};
+    if (filters.interest) safeFilters.interest = filters.interest;
+    if (filters.status) safeFilters.status = filters.status;
+    return repository.findEligibleForMarketing(advisorId, safeFilters);
 }

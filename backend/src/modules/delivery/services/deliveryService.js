@@ -1,251 +1,97 @@
-import * as deliveryRepo from '../repositories/deliveryRepository.js';
-import DeliveryJob from "../models/DeliveryJob.js";
+import * as deliveryRepo from "../repositories/deliveryRepository.js";
+import { getDeliveryContracts } from "../contracts/deliveryContracts.js";
+import {
+    DELIVERY_EVENTS,
+    assertValidObjectId,
+    validateQueuePayload,
+    authorizeCampaignAccess,
+    validateCampaignEligibility,
+    validateRecipientConsentAndEligibility,
+    validateDeliveryModelDocument
+} from "./deliveryEligibility.js";
+import {
+    resolveProviderName,
+    dispatchToProvider
+} from "../providers/providerRegistry.js";
+import { deliveryRateLimiter } from "../providers/deliveryRateLimiter.js";
 import AppError from "../../../utils/AppError.js";
-import leadRepository from "../../leads/leadRepository.js";
-import campaignService from "../../campaigns/campaignService.js";
-import { sendMockDelivery } from "../providers/mockProvider.js";
 
-const ALLOWED_FIELDS = new Set([
-    "advisorId",
-    "campaignId",
-    "leadId",
-    "channel",
-    "recipientEmail",
-    "content",
-    "scheduledAt"
-]);
+const DEFAULT_MAX_RETRY_ATTEMPTS = 3;
 
-function validateMarketingConsent(data) {
-    if (data.channel !== "EMAIL") {
-        return;
+const parseOptionalDate = (value, fieldName) => {
+    if (value === undefined || value === null || value === "") {
+        return undefined;
     }
 
-    if (!data.leadId) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
         throw new AppError(
-            "leadId is required for email delivery.",
+            `Invalid date value for ${fieldName}.`,
             400,
-            "LEAD_ID_REQUIRED"
+            "INVALID_DATE_FILTER"
         );
     }
 
-    const lead = leadRepository.findById(String(data.leadId));
+    return parsed;
+};
 
-    if (!lead) {
+const requireAuthContext = (auth) => {
+    if (!auth || !auth.userId || !auth.role) {
         throw new AppError(
-            "Lead not found.",
-            404,
-            "LEAD_NOT_FOUND"
+            "Authentication required.",
+            401,
+            "UNAUTHORIZED"
         );
     }
+};
 
-    if (
-        lead.marketingConsent !== true ||
-        lead.unsubscribedAt != null
-    ) {
-        throw new AppError(
-            "The lead has not consented to marketing or has unsubscribed.",
-            403,
-            "MARKETING_CONSENT_REQUIRED"
-        );
-    }
+const buildValidatedJobPayload = async ({
+    deliveryData,
+    campaign,
+    createdByUserId,
+    contracts,
+    env
+}) => {
+    validateCampaignEligibility(campaign, deliveryData.channel);
 
-    if (
-        data.recipientEmail &&
-        data.recipientEmail.trim().toLowerCase() !==
-        lead.email.trim().toLowerCase()
-    ) {
-        throw new AppError(
-            "recipientEmail does not match the selected lead.",
-            400,
-            "RECIPIENT_MISMATCH"
-        );
-    }
-
-    data.recipientEmail = lead.email;
-}
-
-async function validateDeliveryCampaign(data, advisorId) {
-    if (!advisorId) {
-        throw new AppError(
-            "advisorId is required.",
-            400,
-            "ADVISOR_ID_REQUIRED"
-        );
-    }
-
-    const campaign = await campaignService.getCampaign({
-        advisorId,
-        campaignId: String(data.campaignId)
+    const { recipientEmail } = await validateRecipientConsentAndEligibility({
+        channel: deliveryData.channel,
+        leadId: deliveryData.leadId ?? null,
+        recipientEmail: deliveryData.recipientEmail ?? null,
+        campaign,
+        contracts
     });
 
-    if (campaign.status !== "ACTIVE") {
-        throw new AppError(
-            "Only ACTIVE campaigns can queue deliveries.",
-            400,
-            "CAMPAIGN_NOT_ACTIVE"
-        );
-    }
+    const providerName = resolveProviderName(deliveryData.channel, env);
 
-    if (campaign.channel !== data.channel) {
-        throw new AppError(
-            "Delivery channel must match the campaign channel.",
-            400,
-            "CHANNEL_MISMATCH"
-        );
-    }
+    const payload = {
+        advisorId: String(campaign.advisorId),
+        campaignId: String(campaign._id),
+        leadId: deliveryData.channel === "EMAIL" ? String(deliveryData.leadId) : null,
+        createdByUserId: createdByUserId ? String(createdByUserId) : null,
+        channel: deliveryData.channel,
+        recipientEmail,
+        content: {
+            subject: deliveryData.content?.subject ?? "",
+            body: deliveryData.content.body.trim()
+        },
+        scheduledAt: deliveryData.scheduledAt
+            ? new Date(deliveryData.scheduledAt)
+            : null,
+        idempotencyKey: deliveryData.idempotencyKey ?? null,
+        provider: providerName,
+        simulated: providerName ? providerName.startsWith("MOCK_") : true
+    };
 
-    return campaign;
-}
+    await validateDeliveryModelDocument(payload);
 
-async function validateAudienceMembership(data, advisorId) {
-    if (data.channel !== "EMAIL") {
-        return;
-    }
+    return payload;
+};
 
-    const audience = await campaignService.getAudience({
-        advisorId,
-        campaignId: String(data.campaignId)
-    });
-
-    const isEligible = audience.recipients.some(
-        recipient =>
-            String(recipient._id) === String(data.leadId)
-    );
-
-    if (!isEligible) {
-        throw new AppError(
-            "Lead does not belong to the selected campaign audience.",
-            403,
-            "LEAD_NOT_IN_AUDIENCE"
-        );
-    }
-}
-
-function validateDelivery(data) {
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-        throw new AppError(
-            "Request body must be a JSON object.",
-            400,
-            "INVALID_REQUEST"
-        );
-    }
-
-    const unknownFields = Object.keys(data).filter(
-        field => !ALLOWED_FIELDS.has(field)
-    );
-
-    if (unknownFields.length > 0) {
-        throw new AppError(
-            `Unsupported field(s): ${unknownFields.join(", ")}.`,
-            400,
-            "INVALID_REQUEST"
-        );
-    }
-
-    if (
-        !data.content ||
-        typeof data.content !== "object" ||
-        Array.isArray(data.content)
-    ) {
-        throw new AppError(
-            "content must be an object.",
-            400,
-            "INVALID_REQUEST"
-        );
-    }
-
-    const job = new DeliveryJob(data);
-    const error = job.validateSync();
-
-    if (error) {
-        error.statusCode = 400;
-        throw error;
-    }
-
-    return job.toObject({
-        flattenObjectIds: true
-    });
-}
-
-async function validateDeliveryEligibility(job) {
-    const lead = job.leadId
-        ? leadRepository.findById(String(job.leadId))
-        : null;
-
-    if (job.channel === "EMAIL") {
-        if (!lead) {
-            throw new AppError(
-                "The recipient lead no longer exists.",
-                404,
-                "LEAD_NOT_FOUND"
-            );
-        }
-
-        validateMarketingConsent({
-            channel: job.channel,
-            leadId: job.leadId,
-            recipientEmail: job.recipientEmail
-        });
-    }
-
-    if (job.leadId && !lead) {
-        throw new AppError(
-            "Lead not found.",
-            404,
-            "LEAD_NOT_FOUND"
-        );
-    }
-
-    const advisorId = String(job.advisorId);
-
-    if (
-        lead &&
-        String(lead.advisorId).toLowerCase() !== advisorId.toLowerCase()
-    ) {
-        throw new AppError(
-            "Lead and advisor do not match.",
-            400,
-            "ADVISOR_MISMATCH"
-        );
-    }
-
-    await validateDeliveryCampaign(job, advisorId);
-
-    if (job.channel === "EMAIL") {
-        const audience = await campaignService.getAudience({
-            advisorId,
-            campaignId: String(job.campaignId)
-        });
-
-        const isEligible = audience.recipients.some(
-            recipient =>
-                String(recipient._id) === String(job.leadId)
-        );
-
-        if (!isEligible) {
-            throw new AppError(
-                "Lead is no longer eligible for this campaign.",
-                403,
-                "LEAD_NOT_IN_AUDIENCE"
-            );
-        }
-    }
-}
-
-export const processDelivery = async (jobId) => {
-    const jobs = await deliveryRepo.getDeliveryJobs();
-
-    const job = jobs.find(
-        job => String(job._id) === String(jobId)
-    );
-
-    if (!job) {
-        throw new AppError(
-            "Delivery job not found.",
-            404,
-            "DELIVERY_NOT_FOUND"
-        );
-    }
+const executeDeliveryJob = async (job, options = {}) => {
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const rateLimiter = options.rateLimiter ?? deliveryRateLimiter;
+    const now = options.now ? new Date(options.now) : new Date();
 
     if (job.deliveryStatus !== "PENDING") {
         throw new AppError(
@@ -255,7 +101,7 @@ export const processDelivery = async (jobId) => {
         );
     }
 
-    if (job.scheduledAt && new Date(job.scheduledAt) > new Date()) {
+    if (job.scheduledAt && new Date(job.scheduledAt) > now) {
         throw new AppError(
             "Delivery job is scheduled for a future date.",
             409,
@@ -263,94 +109,395 @@ export const processDelivery = async (jobId) => {
         );
     }
 
-    await validateDeliveryEligibility(job);
+    const campaign =
+        options.preloadedCampaign ??
+        (await contracts.findCampaignById(job.campaignId, job.advisorId));
 
-    const claimedJob = await deliveryRepo.claimDeliveryJob(jobId);
-
-    if (!claimedJob) {
+    if (!campaign) {
         throw new AppError(
-            "Delivery job is already being processed or is no longer pending.",
-            409,
-            "DELIVERY_ALREADY_CLAIMED"
-        );
-    }
-
-    try {
-        const result = await sendMockDelivery(claimedJob);
-
-        return await deliveryRepo.updateDeliveryJob(jobId, {
-            deliveryStatus: result.success ? "SENT" : "FAILED",
-            sentAt: result.success ? new Date() : null,
-            providerMessageId: result.providerMessageId ?? null,
-            errorMessage: result.errorMessage ?? null
-        });
-
-    } catch (error) {
-        const failedJob = await deliveryRepo.updateDeliveryJob(jobId, {
-            deliveryStatus: "FAILED",
-            sentAt: null,
-            providerMessageId: null,
-            errorMessage: "Mock delivery processing failed."
-        });
-
-        if (!failedJob) {
-            throw new AppError(
-                "Delivery job could not be updated.",
-                500,
-                "DELIVERY_UPDATE_FAILED"
-            );
-        }
-
-        return failedJob;
-    }
-};
-
-export const queueDelivery = async (deliveryData) => {
-    const lead = deliveryData?.leadId
-        ? leadRepository.findById(String(deliveryData.leadId))
-        : null;
-
-    if (deliveryData?.leadId && !lead) {
-        throw new AppError(
-            "Lead not found.",
+            "Campaign not found.",
             404,
-            "LEAD_NOT_FOUND"
+            "CAMPAIGN_NOT_FOUND"
         );
     }
 
-    if (
-        lead &&
-        deliveryData.advisorId &&
-        String(deliveryData.advisorId).toLowerCase() !==
-            String(lead.advisorId).toLowerCase()
-    ) {
+    if (String(campaign.advisorId) !== String(job.advisorId)) {
         throw new AppError(
-            "Lead and advisor do not match.",
-            400,
+            "Delivery job ownership does not match the campaign.",
+            403,
             "ADVISOR_MISMATCH"
         );
     }
 
-    const advisorId = lead
-        ? String(lead.advisorId)
-        : deliveryData?.advisorId;
+    validateCampaignEligibility(campaign, job.channel);
 
-    const validatedData = validateDelivery({
-        ...deliveryData,
-        advisorId
+    await validateRecipientConsentAndEligibility({
+        channel: job.channel,
+        leadId: job.leadId,
+        recipientEmail: job.recipientEmail,
+        campaign,
+        contracts
     });
 
-    validateMarketingConsent(validatedData);
+    const providerName =
+        options.providerOverride ??
+        resolveProviderName(job.channel, options.env);
 
-    await validateDeliveryCampaign(validatedData, advisorId);
+    const release = rateLimiter.acquire(providerName || job.channel);
 
-    await validateAudienceMembership(validatedData, advisorId);
+    try {
+        const claimedJob = await deliveryRepo.claimDeliveryJob(job._id, {
+            now,
+            provider: providerName
+        });
 
-    const job = await deliveryRepo.createDeliveryJob(validatedData);
+        if (!claimedJob) {
+            throw new AppError(
+                "Delivery job is already being processed or is no longer pending.",
+                409,
+                "DELIVERY_ALREADY_CLAIMED"
+            );
+        }
+
+        try {
+            const result = await dispatchToProvider(claimedJob, {
+                ...options,
+                providerOverride: providerName
+            });
+
+            if (result.success) {
+                const sentJob = await deliveryRepo.recordProviderSuccess(
+                    claimedJob._id,
+                    result
+                );
+
+                await contracts.emitDeliveryEvent(DELIVERY_EVENTS.SENT, sentJob, {
+                    providerMessageId: sentJob?.providerMessageId ?? null
+                });
+
+                return sentJob;
+            }
+
+            const failedJob = await deliveryRepo.recordProviderFailure(
+                claimedJob._id,
+                result
+            );
+
+            await contracts.emitDeliveryEvent(DELIVERY_EVENTS.FAILED, failedJob, {
+                errorMessage: failedJob?.errorMessage ?? null
+            });
+
+            return failedJob;
+        } catch {
+            const failedJob = await deliveryRepo.recordProviderFailure(
+                claimedJob._id,
+                {
+                    provider: providerName,
+                    simulated: providerName
+                        ? providerName.startsWith("MOCK_")
+                        : true,
+                    errorMessage: "Delivery provider execution failed unexpectedly."
+                }
+            );
+
+            if (!failedJob) {
+                throw new AppError(
+                    "Delivery job could not be updated.",
+                    500,
+                    "DELIVERY_UPDATE_FAILED"
+                );
+            }
+
+            await contracts.emitDeliveryEvent(DELIVERY_EVENTS.FAILED, failedJob, {
+                errorMessage: failedJob.errorMessage
+            });
+
+            return failedJob;
+        }
+    } finally {
+        release();
+    }
+};
+
+export const queueDelivery = async (deliveryData, auth, options = {}) => {
+    requireAuthContext(auth);
+    validateQueuePayload(deliveryData);
+
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const campaign = await contracts.findCampaignById(
+        deliveryData.campaignId,
+        auth.advisorId
+    );
+
+    await authorizeCampaignAccess(auth, campaign, contracts);
+
+    if (
+        deliveryData.advisorId &&
+        String(deliveryData.advisorId) !== String(campaign.advisorId)
+    ) {
+        throw new AppError(
+            "Client-supplied advisorId cannot override campaign ownership.",
+            403,
+            "FORBIDDEN"
+        );
+    }
+
+    const payload = await buildValidatedJobPayload({
+        deliveryData,
+        campaign,
+        createdByUserId: auth.userId,
+        contracts,
+        env: options.env
+    });
+
+    const job = await deliveryRepo.createDeliveryJob(payload);
+
+    await contracts.emitDeliveryEvent(DELIVERY_EVENTS.QUEUED, job);
 
     return job;
 };
 
-export const getDeliveryHistory = async (filters = {}) => {
-    return await deliveryRepo.getDeliveryJobs(filters);
+export const queueDeliveryForAutomation = async (
+    deliveryData,
+    options = {}
+) => {
+    validateQueuePayload(deliveryData);
+
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const campaign = await contracts.findCampaignById(
+        deliveryData.campaignId,
+        deliveryData.advisorId
+    );
+
+    if (!campaign) {
+        throw new AppError(
+            "Campaign not found.",
+            404,
+            "CAMPAIGN_NOT_FOUND"
+        );
+    }
+
+    if (
+        deliveryData.advisorId &&
+        String(deliveryData.advisorId) !== String(campaign.advisorId)
+    ) {
+        throw new AppError(
+            "Campaign ownership does not match the provided advisorId.",
+            403,
+            "ADVISOR_MISMATCH"
+        );
+    }
+
+    const payload = await buildValidatedJobPayload({
+        deliveryData,
+        campaign,
+        createdByUserId: options.triggeredByUserId ?? null,
+        contracts,
+        env: options.env
+    });
+
+    const job = await deliveryRepo.createDeliveryJob(payload);
+
+    await contracts.emitDeliveryEvent(DELIVERY_EVENTS.QUEUED, job, {
+        source: "AUTOMATION"
+    });
+
+    return job;
+};
+
+export const processDelivery = async (jobId, auth, options = {}) => {
+    requireAuthContext(auth);
+    assertValidObjectId(jobId, "deliveryJobId");
+
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const job = await deliveryRepo.findDeliveryJobById(jobId);
+
+    if (!job) {
+        throw new AppError(
+            "Delivery job not found.",
+            404,
+            "DELIVERY_NOT_FOUND"
+        );
+    }
+
+    const campaign = await contracts.findCampaignById(
+        job.campaignId,
+        job.advisorId
+    );
+
+    await authorizeCampaignAccess(auth, campaign, contracts);
+
+    return executeDeliveryJob(job, {
+        ...options,
+        contracts,
+        preloadedCampaign: campaign
+    });
+};
+
+export const processDeliveryInternal = async (jobId, options = {}) => {
+    assertValidObjectId(jobId, "deliveryJobId");
+
+    const job = await deliveryRepo.findDeliveryJobById(jobId);
+
+    if (!job) {
+        throw new AppError(
+            "Delivery job not found.",
+            404,
+            "DELIVERY_NOT_FOUND"
+        );
+    }
+
+    return executeDeliveryJob(job, options);
+};
+
+export const retryDelivery = async (jobId, auth, options = {}) => {
+    requireAuthContext(auth);
+    assertValidObjectId(jobId, "deliveryJobId");
+
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const job = await deliveryRepo.findDeliveryJobById(jobId);
+
+    if (!job) {
+        throw new AppError(
+            "Delivery job not found.",
+            404,
+            "DELIVERY_NOT_FOUND"
+        );
+    }
+
+    const campaign = await contracts.findCampaignById(
+        job.campaignId,
+        job.advisorId
+    );
+
+    await authorizeCampaignAccess(auth, campaign, contracts);
+
+    if (job.deliveryStatus !== "FAILED") {
+        throw new AppError(
+            "Only FAILED delivery jobs can be retried.",
+            409,
+            "INVALID_RETRY_STATUS"
+        );
+    }
+
+    const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRY_ATTEMPTS;
+    if ((job.attempts ?? 0) >= maxRetries) {
+        throw new AppError(
+            "Maximum retry attempts reached for this delivery job.",
+            409,
+            "MAX_RETRIES_EXCEEDED"
+        );
+    }
+
+    const retried = await deliveryRepo.retryFailedDeliveryJob(jobId);
+
+    if (!retried) {
+        throw new AppError(
+            "Delivery job is no longer eligible for retry.",
+            409,
+            "RETRY_CONFLICT"
+        );
+    }
+
+    return retried;
+};
+
+export const getDeliveryById = async (jobId, auth, options = {}) => {
+    requireAuthContext(auth);
+    assertValidObjectId(jobId, "deliveryJobId");
+
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const job = await deliveryRepo.findDeliveryJobById(jobId);
+
+    if (!job) {
+        throw new AppError(
+            "Delivery job not found.",
+            404,
+            "DELIVERY_NOT_FOUND"
+        );
+    }
+
+    if (auth.role === "ADMIN") {
+        return job;
+    }
+
+    const campaign = await contracts.findCampaignById(
+        job.campaignId,
+        job.advisorId
+    );
+
+    await authorizeCampaignAccess(auth, campaign, contracts);
+
+    return job;
+};
+
+export const getDeliveryHistory = async (filters = {}, auth, options = {}) => {
+    requireAuthContext(auth);
+
+    const contracts = options.contracts ?? getDeliveryContracts();
+    const scopedFilters = {
+        campaignId: filters.campaignId || undefined,
+        leadId: filters.leadId || undefined,
+        channel: filters.channel || undefined,
+        deliveryStatus: filters.deliveryStatus || undefined,
+        provider: filters.provider || undefined,
+        createdFrom: parseOptionalDate(filters.createdFrom, "createdFrom"),
+        createdTo: parseOptionalDate(filters.createdTo, "createdTo"),
+        scheduledFrom: parseOptionalDate(filters.scheduledFrom, "scheduledFrom"),
+        scheduledTo: parseOptionalDate(filters.scheduledTo, "scheduledTo")
+    };
+
+    if (auth.role === "ADVISOR") {
+        if (!auth.advisorId) {
+            throw new AppError(
+                "Advisor profile is required to access delivery history.",
+                403,
+                "ADVISOR_PROFILE_REQUIRED"
+            );
+        }
+
+        if (
+            filters.advisorId &&
+            String(filters.advisorId) !== String(auth.advisorId)
+        ) {
+            throw new AppError(
+                "You cannot access another advisor's delivery history.",
+                403,
+                "FORBIDDEN"
+            );
+        }
+
+        scopedFilters.advisorId = String(auth.advisorId);
+    } else if (auth.role === "MARKETING_SPECIALIST") {
+        const allowedCampaignIds =
+            await contracts.listAuthorizedCampaignIdsForSpecialist(auth.userId);
+
+        if (
+            filters.campaignId &&
+            !allowedCampaignIds.includes(String(filters.campaignId))
+        ) {
+            throw new AppError(
+                "You are not authorized to view delivery history for this campaign.",
+                403,
+                "CAMPAIGN_ASSIGNMENT_REQUIRED"
+            );
+        }
+
+        scopedFilters.allowedCampaignIds = allowedCampaignIds;
+    } else if (auth.role === "ADMIN") {
+        if (filters.advisorId) {
+            scopedFilters.advisorId = filters.advisorId;
+        }
+    } else {
+        throw new AppError(
+            "You do not have permission to view delivery history.",
+            403,
+            "FORBIDDEN"
+        );
+    }
+
+    return deliveryRepo.listDeliveryJobs(scopedFilters, {
+        page: filters.page,
+        limit: filters.limit
+    });
 };

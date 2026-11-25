@@ -4,25 +4,46 @@ export const ROLES = Object.freeze({
     MARKETING_SPECIALIST: "MARKETING_SPECIALIST"
 });
 
-export const ROLE_RULES = Object.freeze({
-    ADMIN: [
-        "MANAGE_USERS",
-        "MANAGE_PERMISSIONS",
-        "MANAGE_PLATFORM"
-    ],
-    ADVISOR: [
-        "MANAGE_OWN_PROFILE",
-        "MANAGE_OWN_LEADS",
-        "MANAGE_OWN_CAMPAIGNS"
-    ],
-    MARKETING_SPECIALIST: [
-        "MANAGE_ASSIGNED_CAMPAIGNS",
-        "MANAGE_PERMITTED_DELIVERIES"
-    ]
-});
+export const PUBLIC_REGISTRATION_ROLES = Object.freeze([
+    ROLES.ADVISOR,
+    ROLES.MARKETING_SPECIALIST
+]);
 
 export const CONSULTATION_TYPES = Object.freeze([
     "ONLINE",
     "IN_PERSON",
     "PHONE"
 ]);
+
+export const ASSIGNMENT_STATUSES = Object.freeze({
+    PENDING: "PENDING",
+    ACCEPTED: "ACCEPTED",
+    DECLINED: "DECLINED",
+    REVOKED: "REVOKED"
+});
+
+export const ROLE_RULES = Object.freeze({
+    [ROLES.ADMIN]: [
+        "MANAGE_USERS",
+        "MANAGE_PERMISSIONS",
+        "MANAGE_PLATFORM",
+        "REVIEW_ASSIGNMENTS"
+    ],
+
+    [ROLES.ADVISOR]: [
+        "MANAGE_OWN_PROFILE",
+        "MANAGE_OWN_LEADS",
+        "MANAGE_OWN_CAMPAIGNS",
+        "MANAGE_OWN_DELIVERIES",
+        "MANAGE_OWN_AUTOMATIONS",
+        "INVITE_SPECIALISTS",
+        "REVOKE_OWN_ASSIGNMENTS"
+    ],
+
+    [ROLES.MARKETING_SPECIALIST]: [
+        "MANAGE_OWN_ACCOUNT",
+        "RESPOND_TO_INVITATIONS",
+        "VIEW_ASSIGNED_CAMPAIGNS",
+        "MANAGE_PERMITTED_DELIVERIES"
+    ]
+});

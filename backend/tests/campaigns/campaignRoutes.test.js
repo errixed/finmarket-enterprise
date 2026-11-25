@@ -105,7 +105,8 @@ test("campaign routes reject unauthenticated requests and derive advisor ownersh
         success: false,
         error: {
             code: "UNAUTHENTICATED",
-            message: "Authentication required."
+            message: "Authentication required.",
+            details: []
         }
     });
     const url = `http://127.0.0.1:${server.address().port}/api/v1/campaigns/templates`;

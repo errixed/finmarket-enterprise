@@ -1,21 +1,31 @@
 import { Types } from "mongoose";
 
 export const sendMockDelivery = async (job) => {
-    const supportedChannels = ["EMAIL", "FACEBOOK"];
-
-    if (!supportedChannels.includes(job.channel)) {
+    if (job.channel === "EMAIL") {
         return {
-            success: false,
+            success: true,
+            provider: "MOCK_EMAIL",
             simulated: true,
-            providerMessageId: null,
-            errorMessage: "Unsupported delivery channel."
+            providerMessageId: `mock-email-${new Types.ObjectId()}`,
+            errorMessage: null
+        };
+    }
+
+    if (job.channel === "FACEBOOK") {
+        return {
+            success: true,
+            provider: "MOCK_FACEBOOK",
+            simulated: true,
+            providerMessageId: `mock-facebook-${new Types.ObjectId()}`,
+            errorMessage: null
         };
     }
 
     return {
-        success: true,
+        success: false,
+        provider: null,
         simulated: true,
-        providerMessageId: `mock-${job.channel.toLowerCase()}-${new Types.ObjectId()}`,
-        errorMessage: null
+        providerMessageId: null,
+        errorMessage: "Unsupported delivery channel."
     };
 };

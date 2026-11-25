@@ -1,17 +1,20 @@
 import mongoose from "mongoose";
+import { CONSULTATION_TYPES } from "../identityConstants.js";
 
 const advisorProfileSchema = new mongoose.Schema(
     {
         userId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
-            required: true
+            required: true,
+            immutable: true
         },
 
         specialties: {
             type: [{
                 type: String,
-                trim: true
+                trim: true,
+                required: true
             }],
             default: []
         },
@@ -19,11 +22,7 @@ const advisorProfileSchema = new mongoose.Schema(
         consultationTypes: {
             type: [{
                 type: String,
-                enum: [
-                    "ONLINE",
-                    "IN_PERSON",
-                    "PHONE"
-                ]
+                enum: CONSULTATION_TYPES
             }],
             default: []
         },
@@ -37,12 +36,17 @@ const advisorProfileSchema = new mongoose.Schema(
 
         isPublic: {
             type: Boolean,
-            default: false
+            default: false,
+            required: true
         }
     },
     {
         timestamps: true,
-        collection: "advisorProfiles"
+        collection: "advisorProfiles",
+        versionKey: false,
+        toJSON: {
+            virtuals: true
+        }
     }
 );
 
@@ -50,6 +54,11 @@ advisorProfileSchema.index(
     { userId: 1 },
     { unique: true }
 );
+
+advisorProfileSchema.index({
+    isPublic: 1,
+    createdAt: -1
+});
 
 export default mongoose.model(
     "AdvisorProfile",
