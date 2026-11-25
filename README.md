@@ -658,3 +658,7 @@ OpenAI ChatGPT was used as a development and documentation assistance tool durin
 2. **Postman collection generation:** ChatGPT generated a consolidated Phase I Postman collection with 157 API requests and automated response assertions. It also revised two assertions after a test run showed that the backend returned `400 ADVISOR_MISMATCH` for a cross-advisor Delivery scenario instead of the initially expected `404 CAMPAIGN_NOT_FOUND`.
 3. **Automated test generation:** ChatGPT generated or helped revise Node.js `node:test` unit and cross-module integration tests covering Identity, Leads, Campaigns, Delivery, Automation, and business-rule validations. The latest local test run reported 55 of 55 passing tests.
 4. **Code review and debugging assistance:** ChatGPT helped identify inconsistencies across modules, improve input and ownership checks, review status transitions and simulated delivery processing, and interpret test failures. Suggested modifications were incorporated into the working implementation by the development team.
+
+## 16. Claude Use Acknowledgement
+
+Anthropic Claude was used by Member 5 (@Godwin-pixel) as an assistance tool during Phase II of the FinMarket-Enterprise project, particularly in relation to the Git commit process and pull request creation.
