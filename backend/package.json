@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test tests/identity/identityPhaseII.test.js",
+    "test": "node --test",
     "test:identity": "node --test tests/identity/*.test.js",
     "test:leads": "node --test tests/leads/*.test.js",
     "test:campaigns": "node --test tests/campaigns/*.test.js",
@@ -25,6 +25,7 @@
     "express": "^5.3.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.11.1"
+    "mongoose": "^9.11.1",
+    "nodemailer": "^10.6.1"
   }
 }
