@@ -5,6 +5,7 @@ const templateSchema = new mongoose.Schema(
         advisorId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "AdvisorProfile",
+            immutable: true,
             required: true
         },
 

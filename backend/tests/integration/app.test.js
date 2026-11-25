@@ -1,4 +1,3 @@
-
 import {
     test,
     before,
@@ -6,7 +5,6 @@ import {
 } from "node:test";
 
 import assert from "node:assert/strict";
-
 import { randomUUID } from "node:crypto";
 
 import {
@@ -20,11 +18,15 @@ import { identityService } from "../../src/modules/identity/identityService.js";
 import { identityRepository } from "../../src/modules/identity/identityRepository.js";
 
 import * as leads from "../../src/modules/leads/leadService.js";
-
 import campaigns from "../../src/modules/campaigns/campaignService.js";
-
 import * as delivery from "../../src/modules/delivery/services/deliveryService.js";
 
+const deliveryOptions = {
+    env: {
+        DELIVERY_EMAIL_PROVIDER: "mock",
+        DELIVERY_FACEBOOK_PROVIDER: "mock"
+    }
+};
 
 before(async () => {
     await connectTestDatabase("integration");
@@ -32,11 +34,9 @@ before(async () => {
     await initializeIdentityModels();
 });
 
-
 after(async () => {
     await disconnectTestDatabase();
 });
-
 
 async function createAdvisor() {
     const result = await identityService.register({
@@ -49,20 +49,29 @@ async function createAdvisor() {
     assert.ok(result.user);
     assert.ok(result.advisorProfile);
 
-    return result.advisorProfile.id;
+    return String(result.advisorProfile.id);
 }
 
+async function createAdvisorActor(advisorId) {
+    const profile = await identityRepository.findAdvisorById(
+        advisorId
+    );
+
+    assert.ok(profile);
+
+    return {
+        userId: String(profile.userId),
+        advisorId: String(profile._id),
+        role: "ADVISOR"
+    };
+}
 
 async function createTestLead(
     advisorId,
     consent = true
 ) {
-    const profile = await identityRepository.findAdvisorById(advisorId);
-    const actor = {
-        userId: String(profile.userId),
-        advisorId: String(profile._id),
-        role: "ADVISOR"
-    };
+    const actor = await createAdvisorActor(advisorId);
+
     const lead = await leads.createLead({
         advisorId,
         name: "Integration Test Lead",
@@ -77,7 +86,6 @@ async function createTestLead(
 
     return lead;
 }
-
 
 async function createTestCampaign(advisorId) {
     const template = await campaigns.createTemplate({
@@ -110,7 +118,6 @@ async function createTestCampaign(advisorId) {
     };
 }
 
-
 test("Integration: create advisor, lead, template and campaign", async () => {
     const advisorId = await createAdvisor();
 
@@ -142,7 +149,6 @@ test("Integration: create advisor, lead, template and campaign", async () => {
     );
 });
 
-
 test("Integration: campaign audience includes consenting leads", async () => {
     const advisorId = await createAdvisor();
 
@@ -170,7 +176,6 @@ test("Integration: campaign audience includes consenting leads", async () => {
         )
     );
 });
-
 
 test("Integration: audience excludes non-consenting leads", async () => {
     const advisorId = await createAdvisor();
@@ -200,7 +205,6 @@ test("Integration: audience excludes non-consenting leads", async () => {
     );
 });
 
-
 test("Integration: activate campaign with eligible audience", async () => {
     const advisorId = await createAdvisor();
 
@@ -227,9 +231,10 @@ test("Integration: activate campaign with eligible audience", async () => {
     );
 });
 
-
 test("Integration: inactive campaign cannot queue delivery", async () => {
     const advisorId = await createAdvisor();
+
+    const actor = await createAdvisorActor(advisorId);
 
     const lead = await createTestLead(advisorId);
 
@@ -253,7 +258,7 @@ test("Integration: inactive campaign cannot queue delivery", async () => {
                     subject: "Hello",
                     body: "Test message"
                 }
-            });
+            }, actor, deliveryOptions);
         },
         {
             statusCode: 400,
@@ -262,9 +267,10 @@ test("Integration: inactive campaign cannot queue delivery", async () => {
     );
 });
 
-
 test("Integration: queue and process a mock email", async () => {
     const advisorId = await createAdvisor();
+
+    const actor = await createAdvisorActor(advisorId);
 
     const lead = await createTestLead(
         advisorId,
@@ -297,7 +303,7 @@ test("Integration: queue and process a mock email", async () => {
             subject: "Retirement",
             body: "Your retirement planning guide."
         }
-    });
+    }, actor, deliveryOptions);
 
     assert.ok(job);
 
@@ -312,7 +318,9 @@ test("Integration: queue and process a mock email", async () => {
     );
 
     const processed = await delivery.processDelivery(
-        job._id
+        String(job._id),
+        actor,
+        deliveryOptions
     );
 
     assert.equal(
@@ -336,9 +344,10 @@ test("Integration: queue and process a mock email", async () => {
     );
 });
 
-
 test("Integration: withdrawing consent prevents processing", async () => {
     const advisorId = await createAdvisor();
+
+    const actor = await createAdvisorActor(advisorId);
 
     const lead = await createTestLead(
         advisorId,
@@ -371,7 +380,7 @@ test("Integration: withdrawing consent prevents processing", async () => {
             subject: "Consent Test",
             body: "Test message"
         }
-    });
+    }, actor, deliveryOptions);
 
     assert.equal(
         job.deliveryStatus,
@@ -383,11 +392,7 @@ test("Integration: withdrawing consent prevents processing", async () => {
         {
             marketingConsent: false
         },
-        {
-            userId: String((await identityRepository.findAdvisorById(advisorId)).userId),
-            advisorId: String(advisorId),
-            role: "ADVISOR"
-        }
+        actor
     );
 
     assert.equal(
@@ -395,9 +400,27 @@ test("Integration: withdrawing consent prevents processing", async () => {
         false
     );
 
+    assert.ok(
+        updatedLead.unsubscribedAt
+    );
+
+    const audience = await campaigns.getAudience({
+        advisorId,
+        campaignId: String(campaign._id)
+    });
+
+    assert.equal(
+        audience.count,
+        0
+    );
+
     await assert.rejects(
         async () => {
-            await delivery.processDelivery(job._id);
+            await delivery.processDelivery(
+                String(job._id),
+                actor,
+                deliveryOptions
+            );
         },
         {
             statusCode: 403,
