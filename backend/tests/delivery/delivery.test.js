@@ -4,39 +4,59 @@ import crypto from "node:crypto";
 import express from "express";
 import mongoose, { Types } from "mongoose";
 
-import DeliveryJob from "../../src/modules/delivery/models/DeliveryJob.js";
-import * as repo from "../../src/modules/delivery/repositories/deliveryRepository.js";
-import * as service from "../../src/modules/delivery/services/deliveryService.js";
-import { processDueDeliveries } from "../../src/modules/delivery/services/deliveryWorker.js";
-import {
-    setDeliveryContracts,
-    resetDeliveryContracts,
-    registerDeliveryEventListener
-} from "../../src/modules/delivery/contracts/deliveryContracts.js";
-import {
-    resolveProviderName,
-    dispatchToProvider
-} from "../../src/modules/delivery/providers/providerRegistry.js";
-import {
-    createDeliveryRateLimiter,
-    deliveryRateLimiter
-} from "../../src/modules/delivery/providers/deliveryRateLimiter.js";
-import deliveryRoutes from "../../src/modules/delivery/routes/deliveryRoutes.js";
-
-import User from "../../src/modules/identity/models/User.js";
-import AdvisorProfile from "../../src/modules/identity/models/AdvisorProfile.js";
-import AdvisorSpecialistAssignment from "../../src/modules/identity/models/AdvisorSpecialistAssignment.js";
-import Lead from "../../src/modules/leads/models/Lead.js";
-import Campaign from "../../src/modules/campaigns/models/Campaign.js";
-
 const TEST_MONGO_URI =
     process.env.DELIVERY_TEST_MONGO_URI ||
     "mongodb://127.0.0.1:27017/finmarket_enterprise_delivery_test?directConnection=true";
 
 const TEST_JWT_SECRET =
     process.env.JWT_SECRET || "delivery_phase2_test_jwt_secret_2026";
+const TEST_JWT_ISSUER = process.env.JWT_ISSUER || "finmarket-enterprise";
+const TEST_JWT_AUDIENCE = process.env.JWT_AUDIENCE || "finmarket-api";
 
 process.env.JWT_SECRET = TEST_JWT_SECRET;
+
+const { default: DeliveryJob } = await import(
+    "../../src/modules/delivery/models/DeliveryJob.js"
+);
+const repo = await import(
+    "../../src/modules/delivery/repositories/deliveryRepository.js"
+);
+const service = await import(
+    "../../src/modules/delivery/services/deliveryService.js"
+);
+const { processDueDeliveries } = await import(
+    "../../src/modules/delivery/services/deliveryWorker.js"
+);
+const {
+    setDeliveryContracts,
+    resetDeliveryContracts,
+    registerDeliveryEventListener
+} = await import("../../src/modules/delivery/contracts/deliveryContracts.js");
+const { resolveProviderName, dispatchToProvider } = await import(
+    "../../src/modules/delivery/providers/providerRegistry.js"
+);
+const { createDeliveryRateLimiter, deliveryRateLimiter } = await import(
+    "../../src/modules/delivery/providers/deliveryRateLimiter.js"
+);
+const { default: deliveryRoutes } = await import(
+    "../../src/modules/delivery/routes/deliveryRoutes.js"
+);
+
+const { default: User } = await import(
+    "../../src/modules/identity/models/User.js"
+);
+const { default: AdvisorProfile } = await import(
+    "../../src/modules/identity/models/AdvisorProfile.js"
+);
+const { default: AdvisorSpecialistAssignment } = await import(
+    "../../src/modules/identity/models/AdvisorSpecialistAssignment.js"
+);
+const { default: Lead } = await import(
+    "../../src/modules/leads/models/Lead.js"
+);
+const { default: Campaign } = await import(
+    "../../src/modules/campaigns/models/Campaign.js"
+);
 
 let server;
 let baseUrl;
@@ -44,17 +64,21 @@ let baseUrl;
 const oid = () => new Types.ObjectId().toString();
 
 const signJwt = (payload, secret = TEST_JWT_SECRET) => {
+    const claims = {
+        iss: TEST_JWT_ISSUER,
+        aud: TEST_JWT_AUDIENCE,
+        ...payload
+    };
     const header = Buffer.from(
         JSON.stringify({ alg: "HS256", typ: "JWT" })
     ).toString("base64url");
-    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
     const sig = crypto
         .createHmac("sha256", secret)
         .update(`${header}.${body}`)
         .digest("base64url");
     return `${header}.${body}.${sig}`;
 };
-
 const apiRequest = async (path, { method = "GET", token, body } = {}) => {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;

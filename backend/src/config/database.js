@@ -1,14 +1,19 @@
 import mongoose from "mongoose";
 
 export default async function connectDatabase(uri) {
-    if (!uri) {
-        throw new Error("MONGO_URI is required to connect to MongoDB.");
+    if (!uri || typeof uri !== "string") {
+        throw new Error("MONGO_URI is required.");
     }
 
     await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 30000
+        serverSelectionTimeoutMS: 15000,
+        maxPoolSize: 20,
+        retryWrites: true
     });
 
-    console.log(`MongoDB connected: ${mongoose.connection.name}`);
+    console.log(
+        `MongoDB connected: ${mongoose.connection.name}`
+    );
+
     return mongoose.connection;
 }

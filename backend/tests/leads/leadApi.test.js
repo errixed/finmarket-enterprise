@@ -2,39 +2,15 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import app from "../../src/app.js";
 import { randomUUID } from "node:crypto";
+import {
+    connectTestDatabase,
+    disconnectTestDatabase
+} from "../helpers/testDatabase.js";
 
-let server, base;
-before(async () => {
-    server = await new Promise(resolve => {
-        const s = app.listen(0, "127.0.0.1", () => resolve(s));
-    });
-
-    base = `http://127.0.0.1:${server.address().port}/api/v1`;
-
-    const response = await fetch(`${base}/auth/register`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            name: "Lead Test Advisor",
-            email: `lead-${randomUUID()}@example.com`,
-            password: "TestPassword123!",
-            role: "ADVISOR"
-        })
-    });
-
-    assert.equal(response.status, 201);
-
-    const result = await response.json();
-
-    sample.advisorId = result.data.advisorProfile.id;
-});
-after(() => new Promise(resolve => server.close(resolve)));
-async function request(path, method = "GET", body) {
-    const response = await fetch(base + path, { method, headers: { "Content-Type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
-    return { status: response.status, body: await response.json() };
-}
+import initializeIdentityModels from "../../src/config/initialize-identity-models.js";
+let server;
+let base;
+let advisorToken;
 
 const sample = {
     advisorId: null,
@@ -43,6 +19,106 @@ const sample = {
     interest: "Retirement planning"
 };
 
+before(async () => {
+    await connectTestDatabase("leads");
+
+    await initializeIdentityModels();
+
+    server = await new Promise(resolve => {
+        const s = app.listen(
+            0,
+            "127.0.0.1",
+            () => resolve(s)
+        );
+    });
+
+    base =
+        `http://127.0.0.1:${server.address().port}/api/v1`;
+
+    const email =
+        `lead-advisor-${randomUUID()}@example.com`;
+
+    const password = "TestPassword123!";
+
+    const registration = await fetch(
+        `${base}/auth/register`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                name: "Lead Test Advisor",
+                email,
+                password,
+                role: "ADVISOR"
+            })
+        }
+    );
+
+    assert.equal(registration.status, 201);
+
+    const registered = await registration.json();
+
+    sample.advisorId =
+        registered.data.advisorProfile.id;
+
+    const login = await fetch(
+        `${base}/auth/login`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                email,
+                password
+            })
+        }
+    );
+
+    assert.equal(login.status, 200);
+
+    const authenticated = await login.json();
+
+    advisorToken = authenticated.data.token;
+});
+
+after(async () => {
+    if (server) {
+        await new Promise(resolve => {
+            server.close(resolve);
+        });
+    }
+
+    await disconnectTestDatabase();
+});
+async function request(
+    path,
+    method = "GET",
+    body = undefined,
+    token = advisorToken
+) {
+    const response = await fetch(base + path, {
+        method,
+        headers: {
+            "Content-Type": "application/json",
+            ...(token
+                ? {
+                    Authorization: `Bearer ${token}`
+                }
+                : {})
+        },
+        ...(body !== undefined
+            ? { body: JSON.stringify(body) }
+            : {})
+    });
+
+    return {
+        status: response.status,
+        body: await response.json()
+    };
+}
 test("create, normalize, read, filter and update leads through HTTP", async () => {
     const created = await request("/leads", "POST", { ...sample, marketingConsent: true });
     assert.equal(created.status, 201);
@@ -99,7 +175,7 @@ test("invalid updates do not mutate stored records; health remains available", a
     assert.equal((await request("/health")).status, 200);
 });
 
- test("only active consent withdrawal records an unsubscribe timestamp", async () => {
+test("only active consent withdrawal records an unsubscribe timestamp", async () => {
     const created = await request("/leads", "POST", { ...sample, email: "never@example.com", marketingConsent: false });
     assert.equal(created.status, 201);
     assert.equal(created.body.data.unsubscribedAt, null);

@@ -13,31 +13,46 @@ import DeliveryJob from "../../src/modules/delivery/models/DeliveryJob.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootEnvPath = path.resolve(__dirname, "../../../.env");
 
-const readJwtSecret = () => {
-    if (process.env.JWT_SECRET) {
-        return process.env.JWT_SECRET.trim();
+const readEnvValue = (key, fallback = null) => {
+    if (process.env[key]) {
+        return process.env[key].trim();
     }
     if (fs.existsSync(rootEnvPath)) {
         const match = fs
             .readFileSync(rootEnvPath, "utf8")
-            .match(/^JWT_SECRET=(.+)$/m);
+            .match(new RegExp(`^${key}=(.+)$`, "m"));
         if (match) return match[1].trim();
     }
-    throw new Error("JWT_SECRET not found in environment or root .env file.");
+    return fallback;
 };
 
+const readJwtSecret = () => {
+    const secret = readEnvValue("JWT_SECRET");
+    if (!secret) {
+        throw new Error("JWT_SECRET not found in environment or root .env file.");
+    }
+    return secret;
+};
+
+const JWT_ISSUER = readEnvValue("JWT_ISSUER", "finmarket-enterprise");
+const JWT_AUDIENCE = readEnvValue("JWT_AUDIENCE", "finmarket-api");
+
 const signJwt = (payload, secret) => {
+    const claims = {
+        iss: JWT_ISSUER,
+        aud: JWT_AUDIENCE,
+        ...payload
+    };
     const header = Buffer.from(
         JSON.stringify({ alg: "HS256", typ: "JWT" })
     ).toString("base64url");
-    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
     const signature = crypto
         .createHmac("sha256", secret)
         .update(`${header}.${body}`)
         .digest("base64url");
     return `${header}.${body}.${signature}`;
 };
-
 const MONGO_URI =
     process.env.MONGO_URI ||
     "mongodb://127.0.0.1:27017/finmarket_enterprise?directConnection=true";

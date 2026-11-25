@@ -1,5 +1,18 @@
 import mongoose from "mongoose";
+import {
+    TRIGGERS,
+    ACTIONS,
+    DELAY_MINUTES_MAX
+} from "../automationConstants.js";
 
+// Phase II: persisted in MongoDB (collection "automationRules").
+//
+// Identifier conventions (see module README):
+//   ownerId    -> User._id of the advisor who owns the rule
+//   campaignId -> Campaign._id (optional)
+//
+// Phase I fields and enum values are preserved. New fields:
+//   actionConfig, allowSpecialistToggle, executionCount.
 const automationRuleSchema = new mongoose.Schema(
     {
         ownerId: {
@@ -25,22 +38,13 @@ const automationRuleSchema = new mongoose.Schema(
 
         trigger: {
             type: String,
-            enum: [
-                "LEAD_CREATED",
-                "LEAD_STATUS_CHANGED",
-                "CONSULTATION_REQUESTED",
-                "CAMPAIGN_ACTIVATED"
-            ],
+            enum: TRIGGERS,
             required: true
         },
 
         action: {
             type: String,
-            enum: [
-                "SEND_EMAIL",
-                "SCHEDULE_FOLLOW_UP",
-                "CREATE_NOTIFICATION"
-            ],
+            enum: ACTIONS,
             required: true
         },
 
@@ -53,7 +57,7 @@ const automationRuleSchema = new mongoose.Schema(
         delayMinutes: {
             type: Number,
             min: 0,
-            max: 43200,
+            max: DELAY_MINUTES_MAX,
             default: 0,
             validate: {
                 validator: Number.isInteger,
@@ -66,9 +70,41 @@ const automationRuleSchema = new mongoose.Schema(
             default: false
         },
 
+        // Optional message content for email actions. Safe defaults are used
+        // when empty. Delivery still validates everything.
+        actionConfig: {
+            subject: {
+                type: String,
+                trim: true,
+                maxlength: 200,
+                default: ""
+            },
+            body: {
+                type: String,
+                trim: true,
+                maxlength: 10000,
+                default: ""
+            }
+        },
+
+        // Explicit permission: when true, a Marketing Specialist who has an
+        // accepted relationship AND a campaign assignment may switch this
+        // rule on or off. Only the owner can change this flag.
+        allowSpecialistToggle: {
+            type: Boolean,
+            default: false
+        },
+
+        // Execution metadata. Written only by the execution service.
         lastExecutedAt: {
             type: Date,
             default: null
+        },
+
+        executionCount: {
+            type: Number,
+            min: 0,
+            default: 0
         }
     },
     {
@@ -85,6 +121,24 @@ automationRuleSchema.index({
 automationRuleSchema.index({
     trigger: 1,
     enabled: 1
+});
+
+// Used when an event arrives: enabled rules for one owner and trigger.
+automationRuleSchema.index({
+    ownerId: 1,
+    trigger: 1,
+    enabled: 1,
+    campaignId: 1
+});
+
+automationRuleSchema.index({
+    campaignId: 1,
+    createdAt: -1
+});
+
+automationRuleSchema.index({
+    ownerId: 1,
+    createdAt: -1
 });
 
 export default mongoose.model(

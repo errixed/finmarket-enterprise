@@ -86,7 +86,8 @@ test("campaign routes return structured errors when advisorId is missing", async
         success: false,
         error: {
             code: "ADVISOR_ID_REQUIRED",
-            message: "advisorId is required."
+            message: "advisorId is required.",
+            details: []
         }
     });
 });
