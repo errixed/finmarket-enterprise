@@ -1,0 +1,387 @@
+name: FinMarket Enterprise CI
+
+on:
+    push:
+        branches:
+            - main
+            - develop
+            - "feature/**"
+
+    pull_request:
+        branches:
+            - main
+            - develop
+
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    NODE_VERSION: "24"
+
+jobs:
+    # JOB 1: Backend Validation and Testing
+    backend:
+        name: Backend - Validate and Test
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+
+        defaults:
+            run:
+                working-directory: backend
+
+        services:
+            mongodb:
+                image: mongo:8.0
+
+                ports:
+                    - 27017:27017
+
+                options: >-
+                    --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 10
+
+        env:
+            NODE_ENV: test
+            PORT: 3001
+            MONGO_URI: mongodb://127.0.0.1:27017/finmarket_test
+            CAMPAIGN_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+            JWT_SECRET: ci-only-test-secret-not-for-production
+            CORS_ORIGIN: http://localhost:5173
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  persist-credentials: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: ${{ env.NODE_VERSION }}
+
+            - name: Install backend dependencies
+              run: |
+                  if [ -f package-lock.json ]; then
+                    npm ci
+                  else
+                    npm install
+                  fi
+
+            - name: Validate JavaScript syntax
+              run: |
+                  find src -type f -name '*.js' \
+                    -print0 | xargs -0 -r -n 1 node --check
+
+            - name: Run backend lint
+              run: npm run lint --if-present
+
+            - name: Validate Mongoose models
+              run: |
+                  if [ -f tests/validateModels.js ]; then
+                    npm run validate:models
+                  else
+                    echo "Model validation script not available."
+                  fi
+
+            - name: Run backend tests
+              run: npm test
+
+            - name: Backend integration smoke test
+              run: |
+                  node src/server.js > /tmp/backend.log 2>&1 &
+                  SERVER_PID=$!
+
+                  cleanup() {
+                    kill "$SERVER_PID" 2>/dev/null || true
+                    wait "$SERVER_PID" 2>/dev/null || true
+                  }
+
+                  trap cleanup EXIT
+
+                  for attempt in $(seq 1 30); do
+                    if curl --fail --silent \
+                      http://localhost:3001/api/v1/health; then
+
+                      echo ""
+                      echo "Backend health check passed."
+                      exit 0
+                    fi
+
+                    sleep 2
+                  done
+
+                  echo "Backend health check failed."
+                  cat /tmp/backend.log
+                  exit 1
+
+            - name: Upload backend logs
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: backend-logs
+                  path: /tmp/backend.log
+                  if-no-files-found: ignore
+                  retention-days: 7
+
+    # JOB 2: Frontend Validation and Build
+    frontend:
+        name: Frontend - Validate and Build
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  persist-credentials: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: ${{ env.NODE_VERSION }}
+
+            - name: Detect frontend application
+              id: frontend-check
+              run: |
+                  if [ -f frontend/package.json ]; then
+                    echo "exists=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "exists=false" >> "$GITHUB_OUTPUT"
+                    echo "::warning::Frontend package.json not found."
+                  fi
+
+            - name: Install frontend dependencies
+              if: steps.frontend-check.outputs.exists == 'true'
+              working-directory: frontend
+              run: |
+                  if [ -f package-lock.json ]; then
+                    npm ci
+                  else
+                    npm install
+                  fi
+
+            - name: Run frontend lint
+              if: steps.frontend-check.outputs.exists == 'true'
+              working-directory: frontend
+              run: npm run lint --if-present
+
+            - name: Run frontend type checking
+              if: steps.frontend-check.outputs.exists == 'true'
+              working-directory: frontend
+              run: npm run typecheck --if-present
+
+            - name: Run frontend tests
+              if: steps.frontend-check.outputs.exists == 'true'
+              working-directory: frontend
+              env:
+                  CI: true
+              run: npm test --if-present
+
+            - name: Build frontend
+              if: steps.frontend-check.outputs.exists == 'true'
+              working-directory: frontend
+              env:
+                  CI: true
+                  VITE_API_URL: http://localhost:3001/api/v1
+              run: npm run build --if-present
+
+            - name: Upload frontend build
+              if: steps.frontend-check.outputs.exists == 'true'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: frontend-build
+                  path: |
+                      frontend/dist/
+                      frontend/build/
+                  if-no-files-found: ignore
+                  retention-days: 7
+
+    # JOB 3: Docker Build Validation
+    docker:
+        name: Docker - Validate and Build
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+
+        needs:
+            - backend
+            - frontend
+
+        env:
+            NODE_ENV: production
+            PORT: 3001
+            MONGO_URI: mongodb://mongodb:27017/finmarket_test
+            JWT_SECRET: ci-only-test-secret-not-for-production
+            CORS_ORIGIN: http://localhost:5173
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  persist-credentials: false
+
+            - name: Setup Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Check Docker installation
+              run: |
+                  docker version
+                  docker compose version
+
+            - name: Detect Docker Compose configuration
+              id: compose-check
+              run: |
+                  for file in \
+                    compose.yaml \
+                    compose.yml \
+                    docker-compose.yaml \
+                    docker-compose.yml
+                  do
+                    if [ -f "$file" ]; then
+                      echo "exists=true" >> "$GITHUB_OUTPUT"
+                      echo "file=$file" >> "$GITHUB_OUTPUT"
+                      exit 0
+                    fi
+                  done
+
+                  echo "exists=false" >> "$GITHUB_OUTPUT"
+                  echo "::warning::Docker Compose configuration not found."
+
+            - name: Validate Docker Compose configuration
+              if: steps.compose-check.outputs.exists == 'true'
+              run: |
+                  docker compose \
+                    -f "${{ steps.compose-check.outputs.file }}" \
+                    config --quiet
+
+            - name: Build Docker Compose services
+              if: steps.compose-check.outputs.exists == 'true'
+              run: |
+                  docker compose \
+                    -f "${{ steps.compose-check.outputs.file }}" \
+                    build
+
+            - name: Build standalone backend image
+              if: steps.compose-check.outputs.exists == 'false'
+              run: |
+                  if [ -f backend/Dockerfile ]; then
+                    docker build \
+                      -t finmarket-backend:ci \
+                      ./backend
+                  else
+                    echo "::warning::Backend Dockerfile not found."
+                  fi
+
+            - name: Build standalone frontend image
+              if: steps.compose-check.outputs.exists == 'false'
+              run: |
+                  if [ -f frontend/Dockerfile ]; then
+                    docker build \
+                      -t finmarket-frontend:ci \
+                      ./frontend
+                  else
+                    echo "::warning::Frontend Dockerfile not found."
+                  fi
+
+            - name: List Docker images
+              run: docker images
+
+    # JOB 4: Dependency Security Audit
+    security:
+        name: Security - Dependency Audit
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+
+        strategy:
+            fail-fast: false
+            matrix:
+                directory:
+                    - backend
+                    - frontend
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  persist-credentials: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: ${{ env.NODE_VERSION }}
+
+            - name: Audit dependencies
+              env:
+                  PROJECT_DIRECTORY: ${{ matrix.directory }}
+              run: |
+                  if [ ! -f "$PROJECT_DIRECTORY/package.json" ]; then
+                    echo "::warning::No package.json found."
+                    exit 0
+                  fi
+
+                  cd "$PROJECT_DIRECTORY"
+
+                  if [ -f package-lock.json ]; then
+                    npm ci
+                  else
+                    npm install
+                  fi
+
+                  npm audit --audit-level=high --omit=dev
+
+    # JOB 5: Final CI Status
+    ci-status:
+        name: CI Status
+        runs-on: ubuntu-latest
+
+        if: always()
+
+        needs:
+            - backend
+            - frontend
+            - docker
+            - security
+
+        steps:
+            - name: Generate workflow summary
+              run: |
+                  echo "## FinMarket Enterprise CI" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "| Job | Result |" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "|---|---|" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "| Backend | ${{ needs.backend.result }} |" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "| Frontend | ${{ needs.frontend.result }} |" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "| Docker | ${{ needs.docker.result }} |" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "| Security | ${{ needs.security.result }} |" \
+                    >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Verify all CI jobs
+              run: |
+                  if [[ "${{ needs.backend.result }}" != "success" \
+                    || "${{ needs.frontend.result }}" != "success" \
+                    || "${{ needs.docker.result }}" != "success" \
+                    || "${{ needs.security.result }}" != "success" ]]; then
+
+                    echo "One or more CI jobs failed."
+                    exit 1
+                  fi
+
+                  echo "All CI jobs completed successfully."
