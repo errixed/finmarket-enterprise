@@ -5,6 +5,7 @@ const campaignSchema = new mongoose.Schema(
         advisorId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "AdvisorProfile",
+            immutable: true,
             required: true
         },
 
@@ -68,6 +69,12 @@ const campaignSchema = new mongoose.Schema(
             default: null
         },
 
+        assignedSpecialistIds: {
+            type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+            default: [],
+            validate: ids => new Set(ids.map(String)).size === ids.length
+        },
+
         status: {
             type: String,
             enum: [
@@ -98,6 +105,7 @@ const campaignSchema = new mongoose.Schema(
 
 campaignSchema.index({ advisorId: 1, status: 1 });
 campaignSchema.index({ scheduledAt: 1 });
+campaignSchema.index({ assignedSpecialistIds: 1, advisorId: 1 });
 
 export default mongoose.model(
     "Campaign",

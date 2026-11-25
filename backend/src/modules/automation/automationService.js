@@ -1,222 +1,315 @@
 import { randomUUID } from "node:crypto";
-import mongoose from "mongoose";
-import AutomationRule from "./models/AutomationRule.js";
-import ActivityEvent from "./models/ActivityEvent.js";
-import * as repository from "./automationRepository.js";
-import { buildSimulatedActions } from "./eventProcessor.js";
-import { identityRepository } from "../identity/identityRepository.js";
+import AppError from "../../utils/AppError.js";
+import { ROLES } from "../identity/identityConstants.js";
+import automationRepository from "./automationRepository.js";
+import { createDefaultAdapters } from "./automationAdapters.js";
+import createExecutionService from "./automationExecutionService.js";
+import createEventService from "./automationEventService.js";
+import createAnalyticsService from "./automationAnalyticsService.js";
+import {
+    getActor,
+    forbidden,
+    requireRole,
+    resolveScope,
+    canViewRule,
+    assertOwnerFilterAllowed
+} from "./automationAccess.js";
+import {
+    parseRuleCreate,
+    parseRuleUpdate,
+    parseEvent,
+    parseListQuery,
+    assertRuleConsistency,
+    isObjectIdString,
+    redactMetadata,
+    validationError
+} from "./automationValidation.js";
+import { SAMPLE_LEAD_ID } from "./automationConstants.js";
 
-// Allowed values come from the Mongoose schemas so they never drift apart.
-const TRIGGERS = AutomationRule.schema.path("trigger").enumValues;
-const ACTIONS = AutomationRule.schema.path("action").enumValues;
-const EVENT_TYPES = ActivityEvent.schema.path("eventType").enumValues;
-const ENTITY_TYPES = ActivityEvent.schema.path("entityType").enumValues;
+// Business rules for rules, simulated events and history. Controllers call
+// this with the authenticated actor; nothing here trusts client-supplied
+// ownership. All database access goes through the repository.
 
-// errorHandler.js reads err.statusCode and err.message.
-const httpError = (statusCode, problems) => {
-    const list = Array.isArray(problems) ? problems : [problems];
-    const error = new Error(list.join(" "));
-    error.statusCode = statusCode;
-    return error;
-};
+// ---------------------------------------------------------------------------
+// Response shaping
+// ---------------------------------------------------------------------------
 
-const isId = (value) =>
-    typeof value === "string" && mongoose.isValidObjectId(value) && value.length === 24;
+const stripVersion = ({ __v, ...rest }) => rest;
 
-const oneOf = (list) => `must be one of: ${list.join(", ")}.`;
+export const toPublicRule = (rule) => stripVersion(rule);
 
-export const createRule = async (body = {}) => {
-    const problems = [];
+export const toPublicEvent = (event) => ({
+    ...stripVersion(event),
+    metadata: redactMetadata(event.metadata ?? {})
+});
 
-    if (!isId(body.ownerId)) problems.push("ownerId must be a valid id.");
+export const toPublicExecution = (execution) => stripVersion(execution);
 
-    if (
-        isId(body.ownerId) &&
-        !identityRepository.findUserById(body.ownerId.toLowerCase())
-    ) {
-        problems.push("ownerId does not reference an existing user.");
+// Same keys as the Phase I response so existing clients keep working.
+export const toSimulatedAction = ({ execution, rule }) => ({
+    ruleId: String(execution.automationRuleId),
+    ruleName: rule?.name ?? null,
+    action: execution.action,
+    delayMinutes: rule?.delayMinutes ?? null,
+    scheduledFor: execution.scheduledFor,
+    status: execution.status
+});
+
+const pageInfo = ({ page, limit }, total) => ({
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit))
+});
+
+function requireObjectId(id, label = "id") {
+    if (!isObjectIdString(id)) {
+        throw validationError(`${label} must be a valid id.`);
     }
 
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (name.length < 3 || name.length > 150) {
-        problems.push("name must be 3 to 150 characters.");
-    }
+    return id.toLowerCase();
+}
 
-    if (body.description !== undefined) {
-        if (typeof body.description !== "string" || body.description.length > 1000) {
-            problems.push("description must be text up to 1000 characters.");
+export function createAutomationService({
+    repository = automationRepository,
+    adapters = createDefaultAdapters(),
+    clock = () => new Date(),
+    env = process.env,
+    executionService = createExecutionService({ repository, adapters, clock }),
+    eventService = createEventService({ repository, adapters, executionService, clock }),
+    analyticsService = createAnalyticsService({ repository, adapters, clock })
+} = {}) {
+    // The campaign must exist and belong to the advisor who owns the rule.
+    // Campaign ownership is decided by the Campaigns data (advisorId), read
+    // through the campaign adapter; it is not re-implemented here.
+    async function assertCampaignUsable(campaignId, ownerAdvisorId) {
+        const campaign = await adapters.campaigns.findCampaign(campaignId);
+
+        if (!campaign) {
+            throw new AppError("Campaign not found.", 404, "CAMPAIGN_NOT_FOUND");
+        }
+
+        if (campaign.advisorId !== ownerAdvisorId) {
+            throw forbidden(
+                "You are not authorized to use this campaign.",
+                "CAMPAIGN_ACCESS_DENIED"
+            );
         }
     }
 
-    if (!TRIGGERS.includes(body.trigger)) problems.push(`trigger ${oneOf(TRIGGERS)}`);
-    if (!ACTIONS.includes(body.action)) problems.push(`action ${oneOf(ACTIONS)}`);
+    async function loadRule(id) {
+        const ruleId = requireObjectId(id, "Rule id");
+        const rule = await repository.findRuleById(ruleId);
 
-    if (body.campaignId !== undefined && body.campaignId !== null && !isId(body.campaignId)) {
-        problems.push("campaignId must be a valid id or null.");
+        if (!rule) throw new AppError("Automation rule not found.", 404, "NOT_FOUND");
+
+        return rule;
     }
 
-    if (body.delayMinutes !== undefined) {
-        if (
-            !Number.isInteger(body.delayMinutes) ||
-            body.delayMinutes < 0 ||
-            body.delayMinutes > 43200
-        ) {
-            problems.push("delayMinutes must be a whole number from 0 to 43200.");
-        }
-    }
+    const service = {
+        // POST /automations
+        async createRule(actor, body) {
+            requireRole(actor, [ROLES.ADVISOR], "Only advisors can create automation rules.");
 
-    if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
-        problems.push("enabled must be true or false.");
-    }
+            const { claimedOwnerId, data } = parseRuleCreate(body);
 
-    if (problems.length) throw httpError(400, problems);
+            // The owner is always the authenticated user. A submitted ownerId
+            // is accepted only if it says the same thing.
+            if (claimedOwnerId && claimedOwnerId !== actor.userId) {
+                throw forbidden(
+                    "ownerId must match the authenticated user.",
+                    "OWNER_MISMATCH"
+                );
+            }
 
-    return repository.createRule({
-        ownerId: body.ownerId,
-        name,
-        description: typeof body.description === "string"
-            ? body.description.trim()
-            : "",
-        trigger: body.trigger,
-        action: body.action,
-        campaignId: body.campaignId ?? null,
-        delayMinutes: body.delayMinutes ?? 0,
-        enabled: body.enabled ?? false
-    });
-};
+            const advisorId = await adapters.identity.getAdvisorIdForUser(actor.userId);
 
-export const listRules = async (query = {}) => {
-    const filter = {};
-    const problems = [];
+            if (!advisorId) {
+                throw forbidden("An active advisor profile is required.", "ADVISOR_PROFILE_REQUIRED");
+            }
 
-    if (query.ownerId !== undefined) {
-        if (isId(query.ownerId)) filter.ownerId = query.ownerId;
-        else problems.push("ownerId must be a valid id.");
-    }
-    if (query.trigger !== undefined) {
-        if (TRIGGERS.includes(query.trigger)) filter.trigger = query.trigger;
-        else problems.push(`trigger ${oneOf(TRIGGERS)}`);
-    }
-    if (query.action !== undefined) {
-        if (ACTIONS.includes(query.action)) filter.action = query.action;
-        else problems.push(`action ${oneOf(ACTIONS)}`);
-    }
-    if (query.enabled !== undefined) {
-        if (["true", "false"].includes(query.enabled)) {
-            filter.enabled = query.enabled === "true";
-        } else {
-            problems.push("enabled must be true or false.");
-        }
-    }
+            assertRuleConsistency(data);
 
-    if (problems.length) throw httpError(400, problems);
+            if (data.campaignId) {
+                await assertCampaignUsable(data.campaignId, advisorId);
+            }
 
-    return repository.findRules(filter);
-};
+            const rule = await repository.createRule({ ...data, ownerId: actor.userId });
 
-// Simulates an event. Other modules will later emit the same shape:
-//   { eventType, entityType, entityId, ownerId, metadata }
-// All body fields are optional; defaults give a sample LEAD_CREATED event.
-export const simulateEvent = async (body = {}) => {
-    const eventType = body.eventType ?? "LEAD_CREATED";
-    const entityType = body.entityType ?? "LEAD";
-    const entityId = body.entityId ?? repository.SAMPLE_LEAD_ID;
-    const ownerId = body.ownerId ?? repository.SAMPLE_OWNER_ID;
-    const eventId = body.eventId ?? `evt_${randomUUID()}`;
-    const metadata = body.metadata ?? {};
-
-    const problems = [];
-    if (!EVENT_TYPES.includes(eventType)) problems.push(`eventType ${oneOf(EVENT_TYPES)}`);
-    if (!ENTITY_TYPES.includes(entityType)) problems.push(`entityType ${oneOf(ENTITY_TYPES)}`);
-    if (!isId(entityId)) problems.push("entityId must be a valid id.");
-    if (!isId(ownerId)) problems.push("ownerId must be a valid id.");
-    if (typeof eventId !== "string" || !eventId.trim()) {
-        problems.push("eventId must be a non-empty string.");
-    }
-    if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
-        problems.push("metadata must be an object.");
-    }
-    if (problems.length) throw httpError(400, problems);
-
-    // Mirrors the unique index on ActivityEvent.eventId: no duplicate processing.
-    if (await repository.findEventByEventId(eventId)) {
-        throw httpError(409, `Event ${eventId} was already processed.`);
-    }
-
-    const rules = await repository.findRules();
-    const draft = { eventType, ownerId, metadata };
-    const simulatedActions = buildSimulatedActions(rules, draft);
-
-    const event = await repository.createEvent({
-        eventId,
-        eventType,
-        entityId,
-        entityType,
-        ownerId,
-        metadata: { ...metadata, simulatedActions }
-    });
-
-    return { event, simulatedActions };
-};
-
-export const listEvents = async (query = {}) => {
-    const filter = {};
-    const problems = [];
-
-    if (query.eventType !== undefined) {
-        if (EVENT_TYPES.includes(query.eventType)) filter.eventType = query.eventType;
-        else problems.push(`eventType ${oneOf(EVENT_TYPES)}`);
-    }
-    if (query.ownerId !== undefined) {
-        if (isId(query.ownerId)) filter.ownerId = query.ownerId;
-        else problems.push("ownerId must be a valid id.");
-    }
-    if (query.entityId !== undefined) {
-        if (isId(query.entityId)) filter.entityId = query.entityId;
-        else problems.push("entityId must be a valid id.");
-    }
-
-    if (problems.length) throw httpError(400, problems);
-
-    return repository.findEvents(filter);
-};
-
-const countBy = (items, getKey) =>
-    items.reduce((counts, item) => {
-        const key = getKey(item);
-        counts[key] = (counts[key] ?? 0) + 1;
-        return counts;
-    }, {});
-
-export const getAnalyticsSummary = async () => {
-    const [rules, events] = await Promise.all([
-        repository.findRules(),
-        repository.findEvents()
-    ]);
-
-    const simulatedActions = events.flatMap(
-        (event) => event.metadata?.simulatedActions ?? []
-    );
-
-    return {
-        rules: {
-            total: rules.length,
-            enabled: rules.filter((rule) => rule.enabled).length,
-            disabled: rules.filter((rule) => !rule.enabled).length,
-            byTrigger: countBy(rules, (rule) => rule.trigger),
-            byAction: countBy(rules, (rule) => rule.action)
+            return toPublicRule(rule);
         },
-        events: {
-            total: events.length,
-            byType: countBy(events, (event) => event.eventType),
-            withMatchingRules: events.filter(
-                (event) => (event.metadata?.simulatedActions ?? []).length > 0
-            ).length
+
+        // GET /automations
+        async listRules(actor, query) {
+            const { filters, ...pagination } = parseListQuery(query, "rules");
+            const scope = await resolveScope(actor, adapters);
+
+            assertOwnerFilterAllowed(scope, filters);
+
+            const { items, total } = await repository.listRules(scope, filters, pagination);
+
+            return {
+                items: items.map(toPublicRule),
+                pagination: pageInfo(pagination, total)
+            };
         },
-        simulatedActions: {
-            total: simulatedActions.length,
-            byAction: countBy(simulatedActions, (item) => item.action)
+
+        // GET /automations/:id
+        async getRule(actor, id) {
+            const rule = await loadRule(id);
+            const scope = await resolveScope(actor, adapters);
+
+            if (!canViewRule(scope, rule)) {
+                throw forbidden("You do not have access to this automation rule.");
+            }
+
+            return toPublicRule(rule);
         },
-        generatedAt: new Date().toISOString()
+
+        // PATCH /automations/:id
+        async updateRule(actor, id, body) {
+            const changes = parseRuleUpdate(body);
+            const rule = await loadRule(id);
+
+            if (actor.role === ROLES.ADVISOR) {
+                if (String(rule.ownerId) !== actor.userId) {
+                    throw forbidden("You can only change your own automation rules.");
+                }
+            } else if (actor.role === ROLES.MARKETING_SPECIALIST) {
+                // Explicit permission only: the owner opted in, the specialist
+                // has a relationship AND a campaign assignment, and the only
+                // change is switching the rule on or off.
+                const scope = await resolveScope(actor, adapters);
+                const onlyEnabled =
+                    Object.keys(changes).length === 1 && changes.enabled !== undefined;
+
+                if (
+                    !rule.allowSpecialistToggle ||
+                    !canViewRule(scope, rule) ||
+                    !onlyEnabled
+                ) {
+                    throw forbidden("You are not authorized to change this automation rule.");
+                }
+            } else {
+                throw forbidden("Administrators have read-only access to automation rules.");
+            }
+
+            const merged = { ...rule, ...changes };
+
+            assertRuleConsistency(merged);
+
+            // Re-check the campaign whenever it changes or the rule is being
+            // switched on, using the OWNER's advisor profile (the actor may
+            // be a specialist).
+            const campaignChanged =
+                changes.campaignId !== undefined &&
+                String(changes.campaignId ?? "") !== String(rule.campaignId ?? "");
+            const enabling = changes.enabled === true && rule.enabled !== true;
+
+            if (merged.campaignId && (campaignChanged || enabling)) {
+                const ownerAdvisorId = await adapters.identity.getAdvisorIdForUser(String(rule.ownerId));
+
+                if (!ownerAdvisorId) {
+                    throw forbidden("The rule owner is not an active advisor.", "ADVISOR_PROFILE_REQUIRED");
+                }
+
+                await assertCampaignUsable(String(merged.campaignId), ownerAdvisorId);
+            }
+
+            const updated = await repository.updateRule(rule._id, changes);
+
+            return toPublicRule(updated);
+        },
+
+        // POST /automations/simulate-event
+        async simulateEvent(actor, body) {
+            requireRole(actor, [ROLES.ADVISOR], "Only advisors can simulate events.");
+
+            // Simulation is a testing tool. Off by default in production.
+            if (env.NODE_ENV === "production" && env.AUTOMATION_SIMULATION_ENABLED !== "true") {
+                throw forbidden("Event simulation is disabled.", "SIMULATION_DISABLED");
+            }
+
+            // Defaults reproduce the Phase I sample: a LEAD_CREATED event for
+            // a sample lead. The owner always defaults to the caller.
+            const event = parseEvent(body, {
+                mode: "simulation",
+                defaults: {
+                    eventType: "LEAD_CREATED",
+                    entityId: SAMPLE_LEAD_ID,
+                    ownerId: actor.userId,
+                    eventId: `evt_${randomUUID()}`
+                }
+            });
+
+            // An untrusted client must never trigger another advisor's rules.
+            if (event.ownerId !== actor.userId) {
+                throw forbidden(
+                    "You can only simulate events for your own account.",
+                    "OWNER_MISMATCH"
+                );
+            }
+
+            const result = await eventService.ingest(event, { source: "SIMULATION" });
+
+            if (result.duplicate) {
+                throw new AppError(
+                    `Event ${event.eventId} was already processed.`,
+                    409,
+                    "EVENT_ALREADY_PROCESSED"
+                );
+            }
+
+            return {
+                event: toPublicEvent(result.event),
+                simulatedActions: result.executions.map(toSimulatedAction)
+            };
+        },
+
+        // GET /automations/events
+        async listEvents(actor, query) {
+            const { filters, ...pagination } = parseListQuery(query, "events");
+            const scope = await resolveScope(actor, adapters);
+
+            assertOwnerFilterAllowed(scope, filters);
+
+            const { items, total } = await repository.listEvents(scope, filters, pagination);
+
+            return {
+                items: items.map(toPublicEvent),
+                pagination: pageInfo(pagination, total)
+            };
+        },
+
+        // GET /automations/executions
+        async listExecutions(actor, query) {
+            const { filters, ...pagination } = parseListQuery(query, "executions");
+            const scope = await resolveScope(actor, adapters);
+
+            assertOwnerFilterAllowed(scope, filters);
+
+            const { items, total } = await repository.listExecutions(scope, filters, pagination);
+
+            return {
+                items: items.map(toPublicExecution),
+                pagination: pageInfo(pagination, total)
+            };
+        },
+
+        // GET /analytics/summary
+        async getAnalyticsSummary(actor) {
+            return analyticsService.getSummary(actor);
+        },
+
+        // Trusted internal API for other modules (not an HTTP route).
+        publishEvent: (rawEvent) => eventService.publishEvent(rawEvent),
+
+        // Run due scheduled actions once (used by the worker and tests).
+        processDueExecutions: (options) => executionService.processDue(options)
     };
-};
+
+    return service;
+}
+
+export { getActor };
+export default createAutomationService;

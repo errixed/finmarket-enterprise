@@ -1,0 +1,437 @@
+{
+  "info": {
+    "name": "FinMarket-Enterprise Phase II - M4 Delivery",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Phase II MongoDB, JWT/RBAC, consent, scheduling, and mock provider tests for the Delivery module (Member 4)."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "advisorToken", "value": "" },
+    { "key": "otherAdvisorToken", "value": "" },
+    { "key": "specialistToken", "value": "" },
+    { "key": "unassignedSpecialistToken", "value": "" },
+    { "key": "otherAdvisorId", "value": "" },
+    { "key": "emailCampaignId", "value": "" },
+    { "key": "facebookCampaignId", "value": "" },
+    { "key": "draftCampaignId", "value": "" },
+    { "key": "otherCampaignId", "value": "" },
+    { "key": "consentingLeadId", "value": "" },
+    { "key": "noConsentLeadId", "value": "" },
+    { "key": "unsubscribedLeadId", "value": "" },
+    { "key": "emailJobId", "value": "" },
+    { "key": "facebookJobId", "value": "" },
+    { "key": "futureJobId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "01 - Auth: Missing JWT (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "02 - Auth: Invalid JWT (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401 Invalid Token', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer invalid.jwt.token" }
+        ],
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "03 - Queue Email Delivery (Advisor, 201)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.test('Job is PENDING and persisted', () => {",
+              "  pm.expect(body.success).to.eql(true);",
+              "  pm.expect(body.data.deliveryStatus).to.eql('PENDING');",
+              "  pm.expect(body.data.channel).to.eql('EMAIL');",
+              "});",
+              "pm.collectionVariables.set('emailJobId', body.data._id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{emailCampaignId}}\",\n  \"leadId\": \"{{consentingLeadId}}\",\n  \"channel\": \"EMAIL\",\n  \"content\": {\n    \"subject\": \"Retirement Planning Consultation\",\n    \"body\": \"Postman Phase II email test {{$timestamp}}\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "04 - Process Email Delivery (Mock Provider, 200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Job marked SENT with mock provider', () => {",
+              "  pm.expect(body.data.deliveryStatus).to.eql('SENT');",
+              "  pm.expect(body.data.provider).to.eql('MOCK_EMAIL');",
+              "  pm.expect(body.data.simulated).to.eql(true);",
+              "  pm.expect(body.data.providerMessageId).to.include('mock-email-');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" }
+        ],
+        "url": "{{baseUrl}}/deliveries/{{emailJobId}}/process"
+      }
+    },
+    {
+      "name": "05 - Replay Already SENT Job Rejected (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 409 Conflict', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" }
+        ],
+        "url": "{{baseUrl}}/deliveries/{{emailJobId}}/process"
+      }
+    },
+    {
+      "name": "06 - Consent: Reject Lead Without Marketing Consent (403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{emailCampaignId}}\",\n  \"leadId\": \"{{noConsentLeadId}}\",\n  \"channel\": \"EMAIL\",\n  \"content\": {\n    \"subject\": \"No Consent\",\n    \"body\": \"Should be rejected\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "07 - Consent: Reject Unsubscribed Lead (403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{emailCampaignId}}\",\n  \"leadId\": \"{{unsubscribedLeadId}}\",\n  \"channel\": \"EMAIL\",\n  \"content\": {\n    \"subject\": \"Unsubscribed\",\n    \"body\": \"Should be rejected\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "08 - Campaign: Reject Non-Active Draft Campaign (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{draftCampaignId}}\",\n  \"leadId\": \"{{consentingLeadId}}\",\n  \"channel\": \"EMAIL\",\n  \"content\": {\n    \"subject\": \"Draft\",\n    \"body\": \"Draft campaign rejected\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "09 - Auth: Reject Another Advisor's Campaign (403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{otherCampaignId}}\",\n  \"channel\": \"FACEBOOK\",\n  \"content\": {\n    \"body\": \"Cross-advisor campaign rejected\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "10 - Specialist: Assigned Specialist Queues Facebook Post (201)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('facebookJobId', body.data._id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{specialistToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{facebookCampaignId}}\",\n  \"channel\": \"FACEBOOK\",\n  \"content\": {\n    \"body\": \"Specialist authorized Facebook post {{$timestamp}}\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "11 - Specialist: Process Facebook Post (Mock Provider, 200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Marked SENT via MOCK_FACEBOOK', () => {",
+              "  pm.expect(body.data.deliveryStatus).to.eql('SENT');",
+              "  pm.expect(body.data.provider).to.eql('MOCK_FACEBOOK');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{specialistToken}}" }
+        ],
+        "url": "{{baseUrl}}/deliveries/{{facebookJobId}}/process"
+      }
+    },
+    {
+      "name": "12 - Specialist: Unassigned Specialist Rejected (403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{unassignedSpecialistToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{facebookCampaignId}}\",\n  \"channel\": \"FACEBOOK\",\n  \"content\": {\n    \"body\": \"Unassigned specialist rejected\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "13 - Scheduling: Queue Future Delivery (201)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.variables.set('futureScheduledAt', new Date(Date.now() + 3600000).toISOString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('futureJobId', pm.response.json().data._id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"campaignId\": \"{{facebookCampaignId}}\",\n  \"channel\": \"FACEBOOK\",\n  \"scheduledAt\": \"{{futureScheduledAt}}\",\n  \"content\": {\n    \"body\": \"Scheduled future post {{$timestamp}}\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/deliveries"
+      }
+    },
+    {
+      "name": "14 - Scheduling: Early Processing Blocked (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 409 Delivery Not Due', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" }
+        ],
+        "url": "{{baseUrl}}/deliveries/{{futureJobId}}/process"
+      }
+    },
+    {
+      "name": "15 - History: Filtered & Paginated (Advisor, 200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Contains pagination and filtered SENT items', () => {",
+              "  pm.expect(body.pagination).to.be.an('object');",
+              "  pm.expect(body.data.length).to.be.above(0);",
+              "  body.data.forEach(item => pm.expect(item.deliveryStatus).to.eql('SENT'));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" }
+        ],
+        "url": "{{baseUrl}}/deliveries?deliveryStatus=SENT&page=1&limit=10"
+      }
+    },
+    {
+      "name": "16 - History: Cross-Advisor Filter Blocked (403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{advisorToken}}" }
+        ],
+        "url": "{{baseUrl}}/deliveries?advisorId={{otherAdvisorId}}"
+      }
+    }
+  ]
+}

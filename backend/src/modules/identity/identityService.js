@@ -1,275 +1,404 @@
-import {
-    randomBytes,
-    scrypt as scryptCallback,
-    timingSafeEqual
-} from "node:crypto";
-import {
-    ROLES,
-    CONSULTATION_TYPES
-} from "./identityConstants.js";
-import { promisify } from "node:util";
+import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
+
+import config from "../../config.js";
+
 import { identityRepository as repository } from "./identityRepository.js";
-import { Types } from "mongoose";
 
-const scrypt = promisify(scryptCallback);
+import {
+    normalizeEmail,
+    validateRegistration,
+    validateProfile,
+    validateAccountUpdate,
+    validatePasswordChange,
+    validId,
+    fail
+} from "./identityValidation.js";
 
-function httpError(statusCode, message) {
-    const error = new Error(message);
-    error.statusCode = statusCode;
-    return error;
-}
+import {
+    hashPassword,
+    verifyPassword
+} from "./passwordService.js";
+
+import { ROLES } from "./identityConstants.js";
 
 function publicUser(user) {
-    const { passwordHash, ...safeUser } = user;
-    return safeUser;
-}
-
-function publicAdvisor(profile) {
-    const user = repository.findUserById(profile.userId);
+    const data = user.toObject
+        ? user.toObject()
+        : { ...user };
 
     return {
-        ...profile,
-        name: user?.name ?? null
+        id: String(data._id),
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        isActive: data.isActive,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt
     };
 }
 
-async function hashPassword(password) {
-    const salt = randomBytes(16).toString("hex");
-    const hash = await scrypt(password, salt, 64);
+function publicAdvisor(profile) {
+    const data = profile.toObject
+        ? profile.toObject()
+        : profile;
 
-    return `${salt}:${hash.toString("hex")}`;
+    const populatedUser =
+        data.userId &&
+            typeof data.userId === "object" &&
+            data.userId.name
+            ? data.userId
+            : null;
+
+    return {
+        id: String(data._id),
+        userId: populatedUser
+            ? String(populatedUser._id)
+            : String(data.userId),
+        name: populatedUser?.name ?? null,
+        specialties: data.specialties,
+        consultationTypes: data.consultationTypes,
+        bio: data.bio,
+        isPublic: data.isPublic,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt
+    };
 }
 
-async function verifyPassword(password, storedHash) {
-    const [salt, expectedHex] = storedHash.split(":");
-
-    if (!salt || !expectedHex) return false;
-
-    const expected = Buffer.from(expectedHex, "hex");
-    if (expected.length !== 64) return false;
-
-    const actual = await scrypt(password, salt, 64);
-
-    return timingSafeEqual(actual, expected);
-}
-
-function validateProfile(profile) {
-    if (profile === undefined) return {};
-
-    if (!profile || typeof profile !== "object" ||
-        Array.isArray(profile)) {
-        throw httpError(400, "Profile must be an object.");
-    }
-
-    const result = {};
-
-    if (profile.specialties !== undefined) {
-        if (!Array.isArray(profile.specialties) ||
-            !profile.specialties.every(item =>
-                typeof item === "string" &&
-                item.trim().length > 0
-            )) {
-            throw httpError(400, "Invalid specialties.");
+function signToken(user) {
+    return jwt.sign(
+        {
+            role: user.role,
+            tokenVersion: user.tokenVersion ?? 0
+        },
+        config.JWT_SECRET,
+        {
+            algorithm: "HS256",
+            subject: String(user._id),
+            expiresIn: config.JWT_EXPIRES_IN,
+            issuer: config.JWT_ISSUER,
+            audience: config.JWT_AUDIENCE
         }
-
-        result.specialties =
-            profile.specialties.map(item => item.trim());
-    }
-
-    if (profile.consultationTypes !== undefined) {
-        if (!Array.isArray(profile.consultationTypes) ||
-            !profile.consultationTypes.every(type =>
-                CONSULTATION_TYPES.includes(type)
-            )) {
-            throw httpError(400, "Invalid consultation types.");
-        }
-
-        result.consultationTypes =
-            profile.consultationTypes;
-    }
-
-    if (profile.bio !== undefined) {
-        if (typeof profile.bio !== "string" ||
-            profile.bio.length > 1000) {
-            throw httpError(400, "Invalid biography.");
-        }
-
-        result.bio = profile.bio.trim();
-    }
-
-    if (profile.isPublic !== undefined) {
-        if (typeof profile.isPublic !== "boolean") {
-            throw httpError(400, "isPublic must be a boolean.");
-        }
-
-        result.isPublic = profile.isPublic;
-    }
-
-    return result;
+    );
 }
 
 export const identityService = {
-    async register(data = {}) {
-        const { name, email, password, role, profile } = data;
-
-        if (typeof name !== "string" ||
-            name.trim().length < 2 ||
-            name.trim().length > 100) {
-            throw httpError(400, "Invalid name.");
-        }
-
-        if (typeof email !== "string" ||
-            email.length > 254 ||
-            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            throw httpError(400, "Invalid email address.");
-        }
-
-        if (typeof password !== "string" ||
-            password.length < 8) {
-            throw httpError(
-                400,
-                "Password must contain at least 8 characters."
+    async updateOwnAccount(data, auth) {
+        if (!auth?.userId) {
+            fail(
+                "Authentication required.",
+                401,
+                "UNAUTHORIZED"
             );
         }
 
-        if (![ROLES.ADVISOR, ROLES.MARKETING_SPECIALIST]
-            .includes(role)) {
-            throw httpError(400, "Invalid registration role.");
-        }
+        const input = validateAccountUpdate(data);
 
-        if (role !== ROLES.ADVISOR &&
-            profile !== undefined) {
-            throw httpError(
-                400,
-                "Only advisors can create advisor profiles."
+        const user = await repository.findUserById(
+            auth.userId,
+            true
+        );
+
+        if (!user || !user.isActive) {
+            fail(
+                "Account unavailable.",
+                401,
+                "UNAUTHORIZED"
             );
         }
 
-        const normalizedEmail = email.trim().toLowerCase();
+        if (input.changes.email !== undefined) {
+            const valid = await verifyPassword(
+                input.currentPassword,
+                user.passwordHash
+            );
 
-        if (repository.findUserByEmail(normalizedEmail)) {
-            throw httpError(409, "Email already registered.");
+            if (!valid) {
+                fail(
+                    "Current password is incorrect.",
+                    401,
+                    "INVALID_CREDENTIALS"
+                );
+            }
+
+            const existing = await repository.findUserByEmail(
+                input.changes.email
+            );
+
+            if (
+                existing &&
+                String(existing._id) !== auth.userId
+            ) {
+                fail(
+                    "Email already registered.",
+                    409,
+                    "DUPLICATE_EMAIL"
+                );
+            }
         }
 
-        const validatedProfile =
-            role === ROLES.ADVISOR
-                ? validateProfile(profile)
-                : null;
+        const updated = await repository.updateOwnAccount(
+            auth.userId,
+            input.changes,
+            input.changes.email !== undefined
+                ? user.passwordHash
+                : undefined
+        );
 
-        const passwordHash = await hashPassword(password);
-
-        const user = repository.createUser({
-            name: name.trim(),
-            email: normalizedEmail,
-            passwordHash,
-            role
-        });
-
-        let advisorProfile = null;
-
-        if (role === ROLES.ADVISOR) {
-            advisorProfile = repository.createAdvisorProfile({
-                userId: user.id,
-                specialties: [],
-                consultationTypes: [],
-                bio: "",
-                isPublic: false,
-                ...validatedProfile
-            });
+        if (!updated) {
+            fail(
+                "Account changed or is unavailable.",
+                409,
+                "ACCOUNT_UPDATE_CONFLICT"
+            );
         }
 
         return {
+            user: publicUser(updated),
+            advisorId: auth.advisorId ?? null
+        };
+    },
+
+    async changePassword(data, auth) {
+        if (!auth?.userId) {
+            fail(
+                "Authentication required.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
+
+        const input = validatePasswordChange(data);
+
+        const user = await repository.findUserById(
+            auth.userId,
+            true
+        );
+
+        if (!user || !user.isActive) {
+            fail(
+                "Account unavailable.",
+                401,
+                "UNAUTHORIZED"
+            );
+        }
+
+        const valid = await verifyPassword(
+            input.currentPassword,
+            user.passwordHash
+        );
+
+        if (!valid) {
+            fail(
+                "Current password is incorrect.",
+                401,
+                "INVALID_CREDENTIALS"
+            );
+        }
+
+        const newHash = await hashPassword(
+            input.newPassword
+        );
+
+        const updated = await repository.changePassword(
+            auth.userId,
+            user.passwordHash,
+            newHash
+        );
+
+        if (!updated) {
+            fail(
+                "Password changed by another request.",
+                409,
+                "PASSWORD_UPDATE_CONFLICT"
+            );
+        }
+
+        return {
+            message: "Password changed successfully. Sign in again."
+        };
+    },
+    async register(data = {}) {
+        const input = validateRegistration(data);
+
+        const existing = await repository.findUserByEmail(
+            input.email
+        );
+
+        if (existing) {
+            fail(
+                "Email already registered.",
+                409,
+                "DUPLICATE_EMAIL"
+            );
+        }
+
+        const passwordHash = await hashPassword(
+            input.password
+        );
+
+        let user;
+        let advisorProfile = null;
+
+        await mongoose.connection.transaction(async session => {
+            user = await repository.createUser({
+                name: input.name,
+                email: input.email,
+                passwordHash,
+                role: input.role,
+                isActive: true
+            }, session);
+
+            if (input.role === ROLES.ADVISOR) {
+                advisorProfile =
+                    await repository.createAdvisorProfile({
+                        userId: user._id,
+                        specialties:
+                            input.profile.specialties ?? [],
+                        consultationTypes:
+                            input.profile.consultationTypes ?? [],
+                        bio: input.profile.bio ?? "",
+                        isPublic:
+                            input.profile.isPublic ?? false
+                    }, session);
+            }
+        });
+
+        return {
             user: publicUser(user),
-            advisorProfile
+            advisorProfile: advisorProfile
+                ? {
+                    ...publicAdvisor(advisorProfile),
+                    name: user.name
+                }
+                : null
         };
     },
 
     async login(data = {}) {
-        const { email, password } = data;
-
-        if (typeof email !== "string" ||
-            typeof password !== "string") {
-            throw httpError(400, "Email and password are required.");
+        if (
+            !data ||
+            typeof data !== "object" ||
+            Array.isArray(data) ||
+            typeof data.email !== "string" ||
+            typeof data.password !== "string" ||
+            data.password.length === 0 ||
+            Buffer.byteLength(data.password) > 1024
+        ) {
+            fail(
+                "Valid email and password are required.",
+                400
+            );
         }
 
-        const user = repository.findUserByEmail(
-            email.trim().toLowerCase()
+        const email = normalizeEmail(data.email);
+
+        const user = await repository.findUserByEmail(
+            email,
+            true
         );
 
         if (!user) {
-            throw httpError(401, "Invalid email or password.");
+            fail(
+                "Invalid email or password.",
+                401,
+                "INVALID_CREDENTIALS"
+            );
         }
 
         const valid = await verifyPassword(
-            password,
+            data.password,
             user.passwordHash
         );
 
         if (!valid || !user.isActive) {
-            throw httpError(401, "Invalid email or password.");
+            fail(
+                "Invalid email or password.",
+                401,
+                "INVALID_CREDENTIALS"
+            );
         }
 
         return {
             user: publicUser(user),
-            authentication: "PHASE_I_DEMO_NO_TOKEN"
+            token: signToken(user),
+            tokenType: "Bearer",
+            expiresIn: config.JWT_EXPIRES_IN
         };
     },
 
-    listAdvisors() {
-        return repository.findAllPublicAdvisors()
-            .map(publicAdvisor);
+    async getCurrentUser(auth) {
+        const user = await repository.findUserById(
+            auth.userId
+        );
+
+        if (!user || !user.isActive) {
+            fail("Account unavailable.", 401, "UNAUTHORIZED");
+        }
+
+        return {
+            user: publicUser(user),
+            advisorId: auth.advisorId ?? null
+        };
     },
 
-    getAdvisor(id) {
-        if (!Types.ObjectId.isValid(id)) {
-            throw httpError(400, "Invalid advisor ID.");
-        }
-        const profile = repository.findAdvisorById(id);
+    async listAdvisors() {
+        const profiles =
+            await repository.findAllPublicAdvisors();
 
-        if (!profile || !profile.isPublic) {
-            throw httpError(404, "Advisor not found.");
+        return profiles.map(publicAdvisor);
+    },
+
+    async getAdvisor(id) {
+        const advisorId = validId(id, "Advisor ID");
+
+        const profile =
+            await repository.findPublicAdvisorById(advisorId);
+
+        if (!profile) {
+            fail(
+                "Advisor not found.",
+                404,
+                "NOT_FOUND"
+            );
         }
 
         return publicAdvisor(profile);
     },
 
-    updateAdvisorProfile(id, data = {}) {
-        if (!Types.ObjectId.isValid(id)) {
-            throw httpError(400, "Invalid advisor ID.");
+    async updateAdvisorProfile(id, data, auth) {
+        const advisorId = validId(id, "Advisor ID");
+
+        if (
+            auth.role !== ROLES.ADVISOR ||
+            auth.advisorId !== advisorId
+        ) {
+            fail(
+                "You cannot modify this advisor profile.",
+                403,
+                "FORBIDDEN"
+            );
         }
 
-        const profile = repository.findAdvisorById(id);
+        const changes = validateProfile(data, true);
+
+        const profile =
+            await repository.updateAdvisorProfile(
+                advisorId,
+                changes
+            );
 
         if (!profile) {
-            throw httpError(404, "Advisor not found.");
+            fail(
+                "Advisor not found.",
+                404,
+                "NOT_FOUND"
+            );
         }
 
-        if (!data || typeof data !== "object" ||
-            Array.isArray(data)) {
-            throw httpError(400, "Invalid profile data.");
-        }
-
-        const allowedFields = [
-            "specialties",
-            "consultationTypes",
-            "bio",
-            "isPublic"
-        ];
-
-        const fields = Object.keys(data);
-
-        if (fields.length === 0 ||
-            fields.some(field => !allowedFields.includes(field))) {
-            throw httpError(400, "Invalid profile fields.");
-        }
-
-        const changes = validateProfile(data);
-
-        const updatedProfile = repository.updateAdvisorProfile(
-            id,
-            changes
-        );
-
-        return publicAdvisor(updatedProfile);
+        return {
+            ...publicAdvisor(profile),
+            name: auth.name
+        };
     }
 };

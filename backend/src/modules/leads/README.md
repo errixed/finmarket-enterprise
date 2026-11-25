@@ -1,56 +1,46 @@
-# Lead Management — Member 2 (Deren Daniel)
+# Lead Management (CRM)
 
-Phase I provides working lead APIs without a MongoDB connection. Records are stored in process memory and disappear when the server restarts. Use fictional contacts only. These endpoints have no authentication in Phase I.
+Lead Management stores each advisor's prospective clients in MongoDB. The module owns lead validation, lifecycle changes, marketing consent, advisor scoping, search, and pagination. Campaign, delivery, and automation behavior remains in the corresponding modules.
 
-## Run and test
+## Run and verify
 
-From `backend/`, run `npm install`, then `npm start`. The default URL is `http://localhost:3001/api/v1`.
+Start the shared MongoDB and backend from the repository root with `docker compose up --build`. For the lead HTTP tests, set `MONGO_URI` to a disposable MongoDB database whose name contains `_test`, configure the JWT environment variables, then run `npm run test:leads` from `backend/`. The test helper creates a unique database for the suite and drops it at the end.
 
-Run `npm test` for the API tests and `node tests/validateModels.js` for the shared initial schema checks. Import `postman/leads-phase1.postman_collection.json` to try the requests manually. Run Create lead first; it saves the returned `leadId` collection variable.
+## API
 
-## Endpoints
+All endpoints require a valid Bearer JWT. The caller must have the `ADVISOR` role and an associated AdvisorProfile. Administrators have no implicit CRM bypass; marketing specialists cannot access private leads through these routes.
 
-| Method | Path | Result |
+| Method | Path | Purpose |
 |---|---|---|
-| POST | /api/v1/leads | Create a lead; 201 |
-| GET | /api/v1/leads | List/filter leads; 200 |
-| GET | /api/v1/leads/:id | Read one lead; 200 |
-| PATCH | /api/v1/leads/:id | Update selected fields; 200 |
+| POST | `/api/v1/leads` | Create a lead for the authenticated advisor |
+| GET | `/api/v1/leads` | Search and list only the authenticated advisor's leads |
+| GET | `/api/v1/leads/:id` | Retrieve an owned lead |
+| PATCH | `/api/v1/leads/:id` | Update an owned lead |
 
-Required creation fields: `advisorId` (24 hex characters), `name` (2–100 characters), `email` (valid address), and `interest` (nonempty, at most 150 characters). The sample advisor ID need not exist in Phase I.
+Creation requires `name`, `email`, and `interest`. Optional fields are `phone`, `status`, `marketingConsent`, `source`, and `notes`. Unknown fields, client-supplied consent timestamps, and empty update objects are rejected. `advisorId` may be sent for compatibility only when it matches the authenticated advisor profile; ownership is always derived from the JWT context.
 
-Optional fields: `phone`, `status`, `marketingConsent`, `source`, `notes`. Names and email are trimmed; email is lowercased. Consent must be an actual JSON boolean, not a string or number. Unknown fields, null values and empty PATCH objects are rejected.
+## Schema and identifiers
 
-Statuses: `NEW`, `CONTACTED`, `CONSULTATION_REQUESTED`, `CONVERTED`. Default: `NEW`. Phase I validates allowed values; transition order is a Phase II responsibility.
+The `leads` collection uses the `Lead` Mongoose model. It stores contact details, interest, lifecycle status, source, marketing consent, consent and unsubscribe timestamps, plus timestamps managed by Mongoose. **`advisorId` references `AdvisorProfile._id`, not `User._id`.** The reference is checked against the Identity module before creation.
 
-Sources: `WEBSITE`, `FACEBOOK`, `MANUAL`, `OTHER`. Default: `MANUAL`.
+Email addresses are trimmed and lowercased before storage. A unique compound index on `{ advisorId, email }` prevents duplicate email addresses for the same advisor while allowing different advisors to manage the same contact independently. Advisor/status, advisor/source, and advisor/interest indexes support common queries.
 
-Consent defaults to false. Explicit consent records a server timestamp and clears `unsubscribedAt`. Only a change from existing consent true to false sets `unsubscribedAt`, preserving the last consent timestamp. Leads who never consented keep `unsubscribedAt` null; repeated false updates preserve the original withdrawal timestamp. Clients cannot supply consent timestamps or record IDs. No marketing messages are sent by this module.
+## Lifecycle
 
-## Example
+Statuses are `NEW`, `CONTACTED`, `CONSULTATION_REQUESTED`, and `CONVERTED`. Allowed changes are `NEW → CONTACTED → CONSULTATION_REQUESTED → CONVERTED`. Keeping the current status is allowed; skipping a stage or moving backward is rejected.
 
-```bash
-curl -X POST http://localhost:3001/api/v1/leads \
-  -H 'Content-Type: application/json' \
-  -d '{"advisorId":"507f1f77bcf86cd799439011","name":"Jane Example","email":"jane@example.com","interest":"Retirement planning","marketingConsent":true}'
-```
+## Consent
 
-A successful response contains `{ "success": true, "data": { ... } }`. Copy `data._id` for the detail and update requests. Invalid inputs return 400; a valid ID with no matching record returns 404, using the shared error envelope.
+Consent defaults to `false`. Explicit consent records `consentRecordedAt`; withdrawal sets `unsubscribedAt`. Re-consent records a fresh consent time and clears the unsubscribe time. Unrelated lead edits do not change consent. Campaign audience lookup only returns leads with consent and no unsubscribe timestamp. Delivery checks consent again before processing.
 
-```bash
-curl 'http://localhost:3001/api/v1/leads?status=NEW&marketingConsent=true&search=jane&page=1&limit=20'
-```
+## Query parameters
 
-Filters: `advisorId`, `status`, `marketingConsent=true|false`, `source`, `interest` (case-insensitive substring), `search` (case-insensitive name/email substring). Filters combine with AND. Pagination defaults to page 1, limit 20; limit is at most 100. Empty results return an empty data array. The response includes `pagination` with page, limit, total and totalPages.
+`GET /api/v1/leads` supports `status`, `marketingConsent=true|false`, `source`, `interest`, `search`, `page`, and `limit`. `advisorId` is accepted only when it matches the caller's profile. Filters run in MongoDB, sort by newest first, and paginate there. Defaults are page `1` and limit `20`; the maximum limit is `100`.
 
-## Architecture and model
+The response contains `data` and `pagination` with `page`, `limit`, `total`, and `totalPages`.
 
-`leadRoutes.js` → `leadController.js` → `leadService.js` → `leadRepository.js`. The existing `models/Lead.js` schema validates records without querying MongoDB. `advisorId` references `AdvisorProfile`; the schema includes contact information, lifecycle status, consent timestamps, source, notes and creation/update timestamps. Repository results are copied so callers cannot mutate stored records accidentally.
+## Internal contracts
 
-Phase II will replace the repository with MongoDB queries, check advisor relationships, scope access to authenticated users, handle duplicate contacts and enforce permitted lifecycle transitions. Phase III will add React directory, detail, editing and filtering screens.
+The service exports `findLeadForDelivery(leadId, advisorId)` for an ownership-scoped lookup and `findMarketingEligibleLeads(advisorId, filters)` for consent-eligible campaign targeting. These functions return no lead outside the requested advisor scope. Campaign audience selection and delivery processing remain owned by their respective modules.
 
-## Verification
-
-The automated HTTP tests cover creation, normalization, detail retrieval, combined filters, pagination, updates, consent withdrawal/regrant, default consent, malformed values, unknown fields, invalid IDs, 404 results, unchanged records after failed updates and the shared health route.
-
-Implementation and tests were prepared with ChatGPT assistance. Member 2 should review the code and be able to explain its behavior before presenting it.
+Lead API tests cover MongoDB persistence, consent, lifecycle, duplicate handling, input validation, pagination, missing authentication, role restrictions, and cross-advisor access. Integration tests exercise campaign and delivery use of the Lead contracts.

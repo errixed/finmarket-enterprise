@@ -1,41 +1,78 @@
 import mongoose from "mongoose";
 import app from "./app.js";
-import config from "./config.js";
+import config, { validateConfiguration } from "./config.js";
 import connectDatabase from "./config/database.js";
-
-if (!Number.isInteger(config.PORT) || config.PORT < 1 || config.PORT > 65535) {
-    throw new Error("Invalid server port.");
-}
+import initializeIdentityModels from "./config/initialize-identity-models.js";
+import initializeAutomation, {
+    stopAutomationWorker
+} from "./modules/automation/initializeAutomation.js";
+import logError from "./utils/logError.js";
 
 let server;
+let shuttingDown = false;
 
 async function shutdown(signal) {
+    if (shuttingDown) return;
+
+    shuttingDown = true;
+
     console.log(`${signal} received. Shutting down...`);
 
-    if (server) {
-        await new Promise((resolve) => server.close(resolve));
-    }
+    const forceExit = setTimeout(() => {
+        console.error("Shutdown timeout.");
+        process.exit(1);
+    }, 10000);
 
-    await mongoose.disconnect();
-    process.exit(0);
+    forceExit.unref();
+
+    try {
+        await stopAutomationWorker();
+
+        if (server) {
+            await new Promise((resolve, reject) => {
+                server.close(error => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+        }
+
+        await mongoose.disconnect();
+
+        clearTimeout(forceExit);
+        process.exit(0);
+    } catch (error) {
+        logError("Shutdown failed:", error);
+        process.exit(1);
+    }
 }
 
 try {
+    validateConfiguration();
+
     await connectDatabase(config.MONGO_URI);
 
+    await initializeIdentityModels();
+
+    await initializeAutomation();
+
     server = app.listen(config.PORT, () => {
-        console.log(`FinMarket-Enterprise backend running on port ${config.PORT}`);
+        console.log(
+            `FinMarket-Enterprise backend running on port ${config.PORT}`
+        );
     });
 
     process.once("SIGTERM", () => {
-        shutdown("SIGTERM").catch(console.error);
+        void shutdown("SIGTERM");
     });
 
     process.once("SIGINT", () => {
-        shutdown("SIGINT").catch(console.error);
+        void shutdown("SIGINT");
     });
 } catch (error) {
-    console.error("Backend startup failed:", error.message);
+    logError("Backend startup failed:", error);
+
     await mongoose.disconnect();
+
     process.exit(1);
 }
