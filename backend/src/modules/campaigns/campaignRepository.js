@@ -1,143 +1,128 @@
 import Campaign from "./models/Campaign.js";
 import Template from "./models/Template.js";
-import leadRepository from "../leads/leadRepository.js";
-import { Types } from "mongoose";
+import Lead from "../leads/models/Lead.js";
+import AdvisorProfile from "../identity/models/AdvisorProfile.js";
+import User from "../identity/models/User.js";
+import Assignment from "../identity/models/AdvisorSpecialistAssignment.js";
 
-const campaigns = new Map();
-const templates = new Map();
+const plain = (document) =>
+  document?.toObject({ flattenObjectIds: true }) ?? null;
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const copy = (value) => structuredClone(value);
-
-function validateModel(Model, data) {
-    const document = new Model(data);
-    const error = document.validateSync();
-
-    if (error) {
-        error.statusCode = 400;
-        throw error;
-    }
-
-    return document.toObject({
-        flattenObjectIds: true
-    });
+export const findAdvisor = (advisorId) =>
+  AdvisorProfile.findById(advisorId).lean();
+export const findAdvisorByUser = (userId) =>
+  AdvisorProfile.findOne({ userId }).lean();
+export const findUser = (userId) =>
+  User.findOne({ _id: userId, isActive: true }).select("_id name role").lean();
+export const acceptedAdvisorIds = async (specialistUserId) => {
+  const ids = await Assignment.distinct("advisorId", {
+    specialistUserId,
+    status: "ACCEPTED",
+    revokedAt: null,
+  });
+  return AdvisorProfile.distinct("_id", { _id: { $in: ids } });
+};
+export const hasAcceptedRelationship = async (advisorId, specialistUserId) =>
+  Boolean(
+    await Assignment.exists({
+      advisorId,
+      specialistUserId,
+      status: "ACCEPTED",
+      revokedAt: null,
+    }),
+  );
+export async function createTemplate(data) {
+  return plain(await Template.create(data));
 }
-
-export function createTemplate(data) {
-    const template = validateModel(Template, {
-        ...data,
-        _id: new Types.ObjectId(),
-        createdAt: new Date(),
-        updatedAt: new Date()
-    });
-
-    templates.set(String(template._id), copy(template));
-
-    return copy(template);
-}
-
 export async function createCampaign(data) {
-    const campaign = validateModel(Campaign, {
-        ...data,
-        _id: new Types.ObjectId(),
-        createdAt: new Date(),
-        updatedAt: new Date()
-    });
-
-    campaigns.set(String(campaign._id), copy(campaign));
-
-    return copy(campaign);
+  return plain(await Campaign.create(data));
 }
-
-export function listCampaigns({ advisorId, status }) {
-    return [...campaigns.values()]
-        .filter(campaign =>
-            String(campaign.advisorId) === String(advisorId) &&
-            (!status || campaign.status === status)
-        )
-        .sort((a, b) =>
-            new Date(b.updatedAt) - new Date(a.updatedAt)
-        )
-        .map(copy);
+export function listCampaigns({
+  advisorId,
+  status,
+  specialistUserId,
+  advisorIds,
+}) {
+  const filter = {
+    ...(advisorId ? { advisorId } : { advisorId: { $in: advisorIds ?? [] } }),
+    ...(status ? { status } : {}),
+    ...(specialistUserId ? { assignedSpecialistIds: specialistUserId } : {}),
+  };
+  return Campaign.find(filter).sort({ updatedAt: -1 }).lean();
 }
-
 export function findCampaign({ advisorId, campaignId }) {
-    const campaign = campaigns.get(String(campaignId));
-
-    if (!campaign || String(campaign.advisorId) !== String(advisorId)) {
-        return null;
-    }
-
-    return copy(campaign);
+  return Campaign.findOne({
+    _id: campaignId,
+    ...(advisorId ? { advisorId } : {}),
+  }).lean();
 }
-
-export async function updateCampaign({ advisorId, campaignId, changes }) {
-    const existing = findCampaign({ advisorId, campaignId });
-
-    if (!existing) {
-        return null;
-    }
-
-    const updated = validateModel(Campaign, {
-        ...existing,
-        ...changes,
-        _id: existing._id,
-        advisorId: existing.advisorId,
-        createdAt: existing.createdAt,
-        updatedAt: new Date()
-    });
-
-    campaigns.set(String(campaignId), copy(updated));
-
-    return copy(updated);
+export async function updateCampaign({
+  advisorId,
+  campaignId,
+  changes,
+  version,
+  specialistUserId,
+}) {
+  return Campaign.findOneAndUpdate(
+    {
+      _id: campaignId,
+      advisorId,
+      __v: version,
+      ...(specialistUserId ? { assignedSpecialistIds: specialistUserId } : {}),
+    },
+    { $set: changes, $inc: { __v: 1 } },
+    { returnDocument: "after", runValidators: true },
+  ).lean();
 }
-
-export function listTemplates({ advisorId, channel }) {
-    return [...templates.values()]
-        .filter(template =>
-            String(template.advisorId) === String(advisorId) &&
-            template.isActive === true &&
-            (!channel || template.channel === channel)
-        )
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(copy);
+export function listTemplates({ advisorId, channel, templateIds }) {
+  return Template.find({
+    ...(advisorId ? { advisorId } : {}),
+    ...(templateIds ? { _id: { $in: templateIds } } : {}),
+    isActive: true,
+    ...(channel ? { channel } : {}),
+  })
+    .sort({ name: 1 })
+    .lean();
 }
-
 export function findTemplate({ advisorId, templateId }) {
-    const template = templates.get(String(templateId));
-
-    if (
-        !template ||
-        String(template.advisorId) !== String(advisorId) ||
-        template.isActive !== true
-    ) {
-        return null;
-    }
-
-    return copy(template);
+  return Template.findOne({
+    _id: templateId,
+    ...(advisorId ? { advisorId } : {}),
+    isActive: true,
+  }).lean();
 }
-
-export function findAudience({ advisorId, interests, leadStatuses }) {
-    return leadRepository.findAll()
-        .filter(lead =>
-            String(lead.advisorId).toLowerCase() ===
-                String(advisorId).toLowerCase() &&
-            lead.marketingConsent === true &&
-            lead.unsubscribedAt == null &&
-            (interests.length === 0 ||
-                interests.some(interest =>
-                    interest.trim().toLowerCase() ===
-                    lead.interest.trim().toLowerCase()
-                )
-            ) &&
-            (leadStatuses.length === 0 ||
-                leadStatuses.includes(lead.status))
-        )
-        .map(lead => ({
-            _id: lead._id,
-            name: lead.name,
-            email: lead.email,
-            interest: lead.interest,
-            status: lead.status
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+export function changeAssignment({ advisorId, campaignId, userId, add }) {
+  return Campaign.findOneAndUpdate(
+    {
+      _id: campaignId,
+      advisorId,
+      assignedSpecialistIds: add ? { $ne: userId } : userId,
+    },
+    {
+      [add ? "$addToSet" : "$pull"]: { assignedSpecialistIds: userId },
+      $inc: { __v: 1 },
+    },
+    { returnDocument: "after", runValidators: true },
+  ).lean();
+}
+export function findAudience({ advisorId, interests = [], leadStatuses = [] }) {
+  return Lead.find({
+    advisorId,
+    marketingConsent: true,
+    unsubscribedAt: null,
+    ...(interests.length
+      ? {
+          interest: {
+            $in: interests.map(
+              (value) => new RegExp(`^${escapeRegex(value.trim())}$`, "i"),
+            ),
+          },
+        }
+      : {}),
+    ...(leadStatuses.length ? { status: { $in: leadStatuses } } : {}),
+  })
+    .select("_id name email interest status")
+    .sort({ name: 1 })
+    .lean();
 }

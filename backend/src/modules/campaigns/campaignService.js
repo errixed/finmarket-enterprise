@@ -1,378 +1,421 @@
 import mongoose from "mongoose";
 import * as repository from "./campaignRepository.js";
-import { identityRepository } from "../identity/identityRepository.js";
 
 export const CAMPAIGN_STRATEGIES = Object.freeze([
-    "NEWSLETTER",
-    "RETIREMENT_PLANNING",
-    "INVESTMENT_EDUCATION",
-    "WEBINAR",
-    "CONSULTATION_OFFER",
-    "OTHER"
+  "NEWSLETTER",
+  "RETIREMENT_PLANNING",
+  "INVESTMENT_EDUCATION",
+  "WEBINAR",
+  "CONSULTATION_OFFER",
+  "OTHER",
 ]);
 
 export const CAMPAIGN_STATUSES = Object.freeze([
-    "DRAFT",
-    "SCHEDULED",
-    "ACTIVE",
-    "COMPLETED",
-    "CANCELLED"
+  "DRAFT",
+  "SCHEDULED",
+  "ACTIVE",
+  "COMPLETED",
+  "CANCELLED",
 ]);
 
 const LEAD_STATUSES = new Set([
-    "NEW",
-    "CONTACTED",
-    "CONSULTATION_REQUESTED",
-    "CONVERTED"
+  "NEW",
+  "CONTACTED",
+  "CONSULTATION_REQUESTED",
+  "CONVERTED",
 ]);
 const CHANNELS = new Set(["EMAIL", "FACEBOOK"]);
 const MUTABLE_FIELDS = new Set([
-    "title",
-    "description",
-    "strategy",
-    "channel",
-    "audience",
-    "templateId",
-    "status",
-    "scheduledAt"
+  "title",
+  "description",
+  "strategy",
+  "channel",
+  "audience",
+  "templateId",
+  "status",
+  "scheduledAt",
 ]);
 const CREATABLE_FIELDS = new Set(["advisorId", ...MUTABLE_FIELDS]);
 
 const CREATABLE_TEMPLATE_FIELDS = new Set([
-    "advisorId",
-    "name",
-    "channel",
-    "subject",
-    "body",
-    "isActive"
+  "advisorId",
+  "name",
+  "channel",
+  "subject",
+  "body",
+  "isActive",
 ]);
 
 const STATUS_TRANSITIONS = Object.freeze({
-    DRAFT: new Set(["DRAFT", "SCHEDULED", "ACTIVE", "CANCELLED"]),
-    SCHEDULED: new Set(["DRAFT", "SCHEDULED", "ACTIVE", "CANCELLED"]),
-    ACTIVE: new Set(["ACTIVE", "COMPLETED", "CANCELLED"]),
-    COMPLETED: new Set(["COMPLETED"]),
-    CANCELLED: new Set(["CANCELLED"])
+  DRAFT: new Set(["DRAFT", "SCHEDULED", "ACTIVE", "CANCELLED"]),
+  SCHEDULED: new Set(["DRAFT", "SCHEDULED", "ACTIVE", "CANCELLED"]),
+  ACTIVE: new Set(["ACTIVE", "COMPLETED", "CANCELLED"]),
+  COMPLETED: new Set(["COMPLETED"]),
+  CANCELLED: new Set(["CANCELLED"]),
 });
 
 function fail(message, statusCode = 400, code = "INVALID_REQUEST") {
-    const error = new Error(message);
-    error.statusCode = statusCode;
-    error.code = code;
-    throw error;
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  throw error;
 }
 
 function requireObjectId(value, fieldName) {
-    if (!mongoose.isValidObjectId(value)) {
-        fail(`${fieldName} must be a valid MongoDB ObjectId.`);
-    }
+  if (!mongoose.isObjectIdOrHexString(value)) {
+    fail(`${fieldName} must be a valid MongoDB ObjectId.`);
+  }
 
-    return value;
+  return value;
 }
 
-function requireExistingAdvisor(advisorId) {
-    requireObjectId(advisorId, "advisorId");
+async function requireExistingAdvisor(advisorId, repo) {
+  requireObjectId(advisorId, "advisorId");
 
-    const advisor = identityRepository.findAdvisorById(
-        String(advisorId)
-    );
+  const advisor = await repo.findAdvisor(String(advisorId));
 
-    if (!advisor) {
-        fail("Advisor not found.", 404, "ADVISOR_NOT_FOUND");
-    }
+  if (!advisor) {
+    fail("Advisor not found.", 404, "ADVISOR_NOT_FOUND");
+  }
 
-    return advisor;
+  return advisor;
 }
 
 function validateFields(payload, allowedFields) {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        fail("The request body must be a JSON object.");
-    }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    fail("The request body must be a JSON object.");
+  }
 
-    const unknownFields = Object.keys(payload)
-        .filter((field) => !allowedFields.has(field));
+  const unknownFields = Object.keys(payload).filter(
+    (field) => !allowedFields.has(field),
+  );
 
-    if (unknownFields.length > 0) {
-        fail(`Unsupported field(s): ${unknownFields.join(", ")}.`);
-    }
+  if (unknownFields.length > 0) {
+    fail(`Unsupported field(s): ${unknownFields.join(", ")}.`);
+  }
 }
 
 function normalizeAudience(audience = {}) {
-    if (!audience || typeof audience !== "object" || Array.isArray(audience)) {
-        fail("audience must be an object.");
-    }
+  if (!audience || typeof audience !== "object" || Array.isArray(audience)) {
+    fail("audience must be an object.");
+  }
 
-    const unsupportedFields = Object.keys(audience)
-        .filter((field) => !["interests", "leadStatuses"].includes(field));
+  const unsupportedFields = Object.keys(audience).filter(
+    (field) => !["interests", "leadStatuses"].includes(field),
+  );
 
-    if (unsupportedFields.length > 0) {
-        fail(`Unsupported audience field(s): ${unsupportedFields.join(", ")}.`);
-    }
+  if (unsupportedFields.length > 0) {
+    fail(`Unsupported audience field(s): ${unsupportedFields.join(", ")}.`);
+  }
 
-    const interests = audience.interests ?? [];
-    const leadStatuses = audience.leadStatuses ?? [];
+  const interests = audience.interests ?? [];
+  const leadStatuses = audience.leadStatuses ?? [];
 
-    if (!Array.isArray(interests) ||
-        interests.some((interest) => typeof interest !== "string")) {
-        fail("audience.interests must be an array of strings.");
-    }
+  if (
+    !Array.isArray(interests) ||
+    interests.some((interest) => typeof interest !== "string")
+  ) {
+    fail("audience.interests must be an array of strings.");
+  }
 
-    if (!Array.isArray(leadStatuses) ||
-        leadStatuses.some((status) => typeof status !== "string" ||
-            !LEAD_STATUSES.has(status))) {
-        fail("audience.leadStatuses contains an unsupported lead status.");
-    }
+  if (
+    !Array.isArray(leadStatuses) ||
+    leadStatuses.some(
+      (status) => typeof status !== "string" || !LEAD_STATUSES.has(status),
+    )
+  ) {
+    fail("audience.leadStatuses contains an unsupported lead status.");
+  }
 
-    return {
-        interests: [...new Set(interests.map((value) => value.trim()).filter(Boolean))],
-        leadStatuses: [...new Set(leadStatuses)]
-    };
+  return {
+    interests: [
+      ...new Set(interests.map((value) => value.trim()).filter(Boolean)),
+    ],
+    leadStatuses: [...new Set(leadStatuses)],
+  };
 }
 
 function normalizeDate(value, fieldName) {
-    if (value === null || value === "") {
-        return null;
-    }
+  if (value === null || value === "") {
+    return null;
+  }
 
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-        fail(`${fieldName} must be a valid date.`);
-    }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    fail(`${fieldName} must be a valid date.`);
+  }
 
-    return date;
+  return date;
 }
 
 function normalizeCampaignFields(payload, { create = false } = {}) {
-    const result = { ...payload };
+  const result = { ...payload };
 
-    if (Object.hasOwn(result, "audience")) {
-        result.audience = normalizeAudience(result.audience);
-    }
+  if (Object.hasOwn(result, "audience")) {
+    result.audience = normalizeAudience(result.audience);
+  }
 
-    if (Object.hasOwn(result, "scheduledAt")) {
-        result.scheduledAt = normalizeDate(result.scheduledAt, "scheduledAt");
-    }
+  if (Object.hasOwn(result, "scheduledAt")) {
+    result.scheduledAt = normalizeDate(result.scheduledAt, "scheduledAt");
+  }
 
-    if (Object.hasOwn(result, "templateId")) {
-        result.templateId = result.templateId
-            ? requireObjectId(result.templateId, "templateId")
-            : null;
-    }
+  if (Object.hasOwn(result, "templateId")) {
+    result.templateId = result.templateId
+      ? requireObjectId(result.templateId, "templateId")
+      : null;
+  }
 
-    if (Object.hasOwn(result, "strategy") &&
-        !CAMPAIGN_STRATEGIES.includes(result.strategy)) {
-        fail("strategy is not supported.");
-    }
+  if (
+    Object.hasOwn(result, "strategy") &&
+    !CAMPAIGN_STRATEGIES.includes(result.strategy)
+  ) {
+    fail("strategy is not supported.");
+  }
 
-    if (Object.hasOwn(result, "channel") && !CHANNELS.has(result.channel)) {
-        fail("channel is not supported.");
-    }
+  if (Object.hasOwn(result, "channel") && !CHANNELS.has(result.channel)) {
+    fail("channel is not supported.");
+  }
 
-    if (Object.hasOwn(result, "status") &&
-        !CAMPAIGN_STATUSES.includes(result.status)) {
-        fail("status is not supported.");
-    }
+  if (
+    Object.hasOwn(result, "status") &&
+    !CAMPAIGN_STATUSES.includes(result.status)
+  ) {
+    fail("status is not supported.");
+  }
 
-    if (create) {
-        result.advisorId = requireObjectId(result.advisorId, "advisorId");
-    }
+  if (create) {
+    result.advisorId = requireObjectId(result.advisorId, "advisorId");
+  }
 
-    return result;
+  return result;
 }
 
 async function validateTemplate(campaign, repo) {
-    if (!campaign.templateId) {
-        fail("Select an active template before activating the campaign.");
-    }
+  if (!campaign.templateId) {
+    fail("Select an active template before activating the campaign.");
+  }
 
-    const template = await repo.findTemplate({
-        advisorId: campaign.advisorId,
-        templateId: campaign.templateId
-    });
+  const template = await repo.findTemplate({
+    advisorId: campaign.advisorId,
+    templateId: campaign.templateId,
+  });
 
-    if (!template) {
-        fail("The selected template was not found for this advisor.", 404, "TEMPLATE_NOT_FOUND");
-    }
+  if (!template) {
+    fail(
+      "The selected template was not found for this advisor.",
+      404,
+      "TEMPLATE_NOT_FOUND",
+    );
+  }
 
-    if (template.channel !== campaign.channel) {
-        fail("The selected template channel must match the campaign channel.");
-    }
+  if (template.channel !== campaign.channel) {
+    fail("The selected template channel must match the campaign channel.");
+  }
 }
 
 async function validateActiveCampaign(campaign, repo) {
-    await validateTemplate(campaign, repo);
-    const audience = await repo.findAudience({
-        advisorId: campaign.advisorId,
-        interests: campaign.audience.interests,
-        leadStatuses: campaign.audience.leadStatuses
-    });
+  await validateTemplate(campaign, repo);
+  const audience = await repo.findAudience({
+    advisorId: campaign.advisorId,
+    interests: campaign.audience.interests,
+    leadStatuses: campaign.audience.leadStatuses,
+  });
 
-    if (audience.length === 0) {
-        fail("A campaign needs at least one consenting, subscribed lead before activation.");
-    }
+  if (audience.length === 0) {
+    fail(
+      "A campaign needs at least one consenting, subscribed lead before activation.",
+    );
+  }
 }
 
 async function validateStatusChange(previous, next, repo) {
-    if (!STATUS_TRANSITIONS[previous].has(next.status)) {
-        fail(`A campaign cannot transition from ${previous} to ${next.status}.`);
-    }
+  if (!STATUS_TRANSITIONS[previous].has(next.status)) {
+    fail(`A campaign cannot transition from ${previous} to ${next.status}.`);
+  }
 
-    if (next.status === "SCHEDULED" &&
-        (!next.scheduledAt || next.scheduledAt <= new Date())) {
-        fail("A scheduled campaign must have a future scheduledAt date.");
-    }
+  if (
+    next.status === "SCHEDULED" &&
+    (!next.scheduledAt || next.scheduledAt <= new Date())
+  ) {
+    fail("A scheduled campaign must have a future scheduledAt date.");
+  }
 
-    if (next.status === "ACTIVE" && previous !== "ACTIVE") {
-        await validateActiveCampaign(next, repo);
-    }
+  if (next.status === "ACTIVE" && previous !== "ACTIVE") {
+    await validateActiveCampaign(next, repo);
+  }
 }
 
 function asPlainObject(value) {
-    return typeof value.toObject === "function" ? value.toObject() : value;
+  return typeof value.toObject === "function" ? value.toObject() : value;
 }
 
 export function createCampaignService(repo = repository) {
-    return {
-        async createCampaign(payload) {
-            validateFields(payload, CREATABLE_FIELDS);
-            const data = normalizeCampaignFields(payload, { create: true });
-            requireExistingAdvisor(data.advisorId);
-            const desiredStatus = data.status ?? "DRAFT";
-            data.status = "DRAFT";
-            data.audience = normalizeAudience(data.audience);
+  return {
+    async createCampaign(payload) {
+      validateFields(payload, CREATABLE_FIELDS);
+      const data = normalizeCampaignFields(payload, { create: true });
+      await requireExistingAdvisor(data.advisorId, repo);
+      const desiredStatus = data.status ?? "DRAFT";
+      data.status = "DRAFT";
+      data.audience = normalizeAudience(data.audience);
 
-            if (desiredStatus !== "DRAFT") {
-                const proposed = { ...data, status: desiredStatus };
-                await validateStatusChange("DRAFT", proposed, repo);
-                data.status = desiredStatus;
-                data.completedAt = desiredStatus === "COMPLETED" ? new Date() : null;
-            }
+      if (desiredStatus !== "DRAFT") {
+        const proposed = { ...data, status: desiredStatus };
+        await validateStatusChange("DRAFT", proposed, repo);
+        data.status = desiredStatus;
+        data.completedAt = desiredStatus === "COMPLETED" ? new Date() : null;
+      }
 
-            if (data.templateId) {
-                await validateTemplate(data, repo);
-            }
+      if (data.templateId) {
+        await validateTemplate(data, repo);
+      }
 
-            return repo.createCampaign(data);
-        },
+      return repo.createCampaign(data);
+    },
 
-        async listCampaigns({ advisorId, status }) {
-            requireObjectId(advisorId, "advisorId");
-            if (status && !CAMPAIGN_STATUSES.includes(status)) {
-                fail("status is not supported.");
-            }
+    async listCampaigns({ advisorId, status }) {
+      requireObjectId(advisorId, "advisorId");
+      if (status && !CAMPAIGN_STATUSES.includes(status)) {
+        fail("status is not supported.");
+      }
 
-            return repo.listCampaigns({ advisorId, status });
-        },
+      return repo.listCampaigns({ advisorId, status });
+    },
 
-        async getCampaign({ advisorId, campaignId }) {
-            requireObjectId(advisorId, "advisorId");
-            requireObjectId(campaignId, "campaignId");
-            const campaign = await repo.findCampaign({ advisorId, campaignId });
+    async getCampaign({ advisorId, campaignId }) {
+      requireObjectId(advisorId, "advisorId");
+      requireObjectId(campaignId, "campaignId");
+      const campaign = await repo.findCampaign({ advisorId, campaignId });
 
-            if (!campaign) {
-                fail("Campaign not found.", 404, "CAMPAIGN_NOT_FOUND");
-            }
+      if (!campaign) {
+        fail("Campaign not found.", 404, "CAMPAIGN_NOT_FOUND");
+      }
 
-            return campaign;
-        },
+      return campaign;
+    },
 
-        async updateCampaign({ advisorId, campaignId, payload }) {
-            requireObjectId(advisorId, "advisorId");
-            requireObjectId(campaignId, "campaignId");
-            validateFields(payload, MUTABLE_FIELDS);
+    async updateCampaign({ advisorId, campaignId, payload, specialistUserId }) {
+      requireObjectId(advisorId, "advisorId");
+      requireObjectId(campaignId, "campaignId");
+      validateFields(payload, MUTABLE_FIELDS);
 
-            if (Object.keys(payload).length === 0) {
-                fail("Provide at least one campaign field to update.");
-            }
+      if (Object.keys(payload).length === 0) {
+        fail("Provide at least one campaign field to update.");
+      }
 
-            const current = await repo.findCampaign({ advisorId, campaignId });
-            if (!current) {
-                fail("Campaign not found.", 404, "CAMPAIGN_NOT_FOUND");
-            }
+      const current = await repo.findCampaign({ advisorId, campaignId });
+      if (!current) {
+        fail("Campaign not found.", 404, "CAMPAIGN_NOT_FOUND");
+      }
 
-            const changes = normalizeCampaignFields(payload);
-            const next = {
-                ...asPlainObject(current),
-                ...changes,
-                audience: Object.hasOwn(changes, "audience")
-                    ? changes.audience
-                    : current.audience
-            };
-            const previousStatus = current.status;
-            next.status = changes.status ?? previousStatus;
+      if (
+        specialistUserId &&
+        (!current.assignedSpecialistIds?.some(
+          (value) => String(value) === String(specialistUserId),
+        ) ||
+          !(await repo.hasAcceptedRelationship(advisorId, specialistUserId)))
+      ) {
+        fail("Campaign access denied.", 403, "FORBIDDEN");
+      }
+      const changes = normalizeCampaignFields(payload);
+      const next = {
+        ...asPlainObject(current),
+        ...changes,
+        audience: Object.hasOwn(changes, "audience")
+          ? changes.audience
+          : current.audience,
+      };
+      const previousStatus = current.status;
+      next.status = changes.status ?? previousStatus;
 
-            if (next.status !== previousStatus) {
-                await validateStatusChange(previousStatus, next, repo);
-            }
+      if (
+        next.status !== previousStatus ||
+        Object.hasOwn(changes, "scheduledAt")
+      ) {
+        await validateStatusChange(previousStatus, next, repo);
+      }
 
-            const templateOrAudienceChanged =
-                Object.hasOwn(changes, "channel") ||
-                Object.hasOwn(changes, "templateId") ||
-                Object.hasOwn(changes, "audience");
+      const templateOrAudienceChanged =
+        Object.hasOwn(changes, "channel") ||
+        Object.hasOwn(changes, "templateId") ||
+        Object.hasOwn(changes, "audience");
 
-            if (next.status === "ACTIVE" && templateOrAudienceChanged) {
-                await validateActiveCampaign(next, repo);
-            } else if (templateOrAudienceChanged && next.templateId) {
-                await validateTemplate(next, repo);
-            }
+      if (next.status === "ACTIVE" && templateOrAudienceChanged) {
+        await validateActiveCampaign(next, repo);
+      } else if (templateOrAudienceChanged && next.templateId) {
+        await validateTemplate(next, repo);
+      }
 
-            if (Object.hasOwn(changes, "status")) {
-                changes.completedAt = next.status === "COMPLETED"
-                    ? new Date()
-                    : null;
-            }
+      if (next.status !== previousStatus) {
+        changes.completedAt = next.status === "COMPLETED" ? new Date() : null;
+      }
 
-            return repo.updateCampaign({ advisorId, campaignId, changes });
-        },
+      if (
+        specialistUserId &&
+        !(await repo.hasAcceptedRelationship(advisorId, specialistUserId))
+      ) {
+        fail("Campaign access denied.", 403, "FORBIDDEN");
+      }
+      const updated = await repo.updateCampaign({
+        advisorId,
+        campaignId,
+        changes,
+        version: current.__v,
+        specialistUserId,
+      });
+      if (!updated)
+        fail("Campaign changed concurrently; retry.", 409, "CAMPAIGN_CONFLICT");
+      return updated;
+    },
 
-        async createTemplate(payload) {
-            validateFields(payload, CREATABLE_TEMPLATE_FIELDS);
+    async createTemplate(payload) {
+      validateFields(payload, CREATABLE_TEMPLATE_FIELDS);
 
-            requireExistingAdvisor(payload.advisorId);
+      await requireExistingAdvisor(payload.advisorId, repo);
 
-            if (payload.channel && !CHANNELS.has(payload.channel)) {
-                fail("channel is not supported.");
-            }
+      if (payload.channel && !CHANNELS.has(payload.channel)) {
+        fail("channel is not supported.");
+      }
 
-            return repo.createTemplate(payload);
-        },
+      return repo.createTemplate(payload);
+    },
 
-        async listTemplates({ advisorId, channel }) {
-            requireObjectId(advisorId, "advisorId");
-            if (channel && !CHANNELS.has(channel)) {
-                fail("channel is not supported.");
-            }
+    async listTemplates({ advisorId, channel }) {
+      requireObjectId(advisorId, "advisorId");
+      if (channel && !CHANNELS.has(channel)) {
+        fail("channel is not supported.");
+      }
 
-            return repo.listTemplates({ advisorId, channel });
-        },
+      return repo.listTemplates({ advisorId, channel });
+    },
 
-        async getTemplate({ advisorId, templateId }) {
-            requireObjectId(advisorId, "advisorId");
-            requireObjectId(templateId, "templateId");
-            const template = await repo.findTemplate({ advisorId, templateId });
+    async getTemplate({ advisorId, templateId }) {
+      requireObjectId(advisorId, "advisorId");
+      requireObjectId(templateId, "templateId");
+      const template = await repo.findTemplate({ advisorId, templateId });
 
-            if (!template) {
-                fail("Template not found.", 404, "TEMPLATE_NOT_FOUND");
-            }
+      if (!template) {
+        fail("Template not found.", 404, "TEMPLATE_NOT_FOUND");
+      }
 
-            return template;
-        },
+      return template;
+    },
 
-        async getAudience({ advisorId, campaignId }) {
-            const campaign = await this.getCampaign({ advisorId, campaignId });
-            const audience = await repo.findAudience({
-                advisorId,
-                interests: campaign.audience.interests,
-                leadStatuses: campaign.audience.leadStatuses
-            });
+    async getAudience({ advisorId, campaignId }) {
+      const campaign = await this.getCampaign({ advisorId, campaignId });
+      const audience = await repo.findAudience({
+        advisorId,
+        interests: campaign.audience.interests,
+        leadStatuses: campaign.audience.leadStatuses,
+      });
 
-            return {
-                campaignId: campaign._id,
-                count: audience.length,
-                recipients: audience
-            };
-        }
-    };
+      return {
+        campaignId: campaign._id,
+        count: audience.length,
+        recipients: audience,
+      };
+    },
+  };
 }
 
 const campaignService = createCampaignService();

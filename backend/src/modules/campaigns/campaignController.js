@@ -1,91 +1,43 @@
-import AppError from "../../utils/AppError.js";
-
-function advisorIdFromRequest(req, { allowBody = false } = {}) {
-    const advisorId = req.user?.advisorId ??
-        req.advisorId ??
-        req.query.advisorId ??
-        (allowBody ? req.body?.advisorId : undefined);
-
-    if (!advisorId) {
-        throw new AppError("advisorId is required.", 400, "ADVISOR_ID_REQUIRED");
-    }
-
-    return advisorId;
-}
-
-function sendData(res, data, status = 200) {
-    return res.status(status).json({ success: true, data });
-}
-
 export function createCampaignController(service) {
-    return {
-        createCampaign: async (req, res) => sendData(
-            res,
-            await service.createCampaign({
-                ...req.body,
-                advisorId: advisorIdFromRequest(req, { allowBody: true })
-            }),
-            201
+  const send = (res, data, status = 200) =>
+    res.status(status).json({ success: true, data });
+  return {
+    createCampaign: async (req, res) =>
+      send(res, await service.createCampaign(req.user, req.body), 201),
+    listCampaigns: async (req, res) =>
+      send(res, await service.listCampaigns(req.user, req.query)),
+    getCampaign: async (req, res) =>
+      send(res, await service.getCampaign(req.user, req.params.campaignId)),
+    updateCampaign: async (req, res) =>
+      send(
+        res,
+        await service.updateCampaign(req.user, req.params.campaignId, req.body),
+      ),
+    getAudience: async (req, res) =>
+      send(res, await service.getAudience(req.user, req.params.campaignId)),
+    createTemplate: async (req, res) =>
+      send(res, await service.createTemplate(req.user, req.body), 201),
+    listTemplates: async (req, res) =>
+      send(res, await service.listTemplates(req.user, req.query)),
+    getTemplate: async (req, res) =>
+      send(res, await service.getTemplate(req.user, req.params.templateId)),
+    assign: async (req, res) =>
+      send(
+        res,
+        await service.assign(req.user, req.params.campaignId, req.body),
+        201,
+      ),
+    specialists: async (req, res) =>
+      send(res, await service.specialists(req.user, req.params.campaignId)),
+    remove: async (req, res) =>
+      send(
+        res,
+        await service.remove(
+          req.user,
+          req.params.campaignId,
+          req.params.userId,
         ),
-
-        listCampaigns: async (req, res) => sendData(
-            res,
-            await service.listCampaigns({
-                advisorId: advisorIdFromRequest(req),
-                status: req.query.status
-            })
-        ),
-
-        getCampaign: async (req, res) => sendData(
-            res,
-            await service.getCampaign({
-                advisorId: advisorIdFromRequest(req),
-                campaignId: req.params.campaignId
-            })
-        ),
-
-        updateCampaign: async (req, res) => sendData(
-            res,
-            await service.updateCampaign({
-                advisorId: advisorIdFromRequest(req),
-                campaignId: req.params.campaignId,
-                payload: req.body
-            })
-        ),
-
-        getAudience: async (req, res) => sendData(
-            res,
-            await service.getAudience({
-                advisorId: advisorIdFromRequest(req),
-                campaignId: req.params.campaignId
-            })
-        ),
-
-        createTemplate: async (req, res) => sendData(
-            res,
-            await service.createTemplate({
-                ...req.body,
-                advisorId: advisorIdFromRequest(req, { allowBody: true })
-            }),
-            201
-        ),
-
-        listTemplates: async (req, res) => sendData(
-            res,
-            await service.listTemplates({
-                advisorId: advisorIdFromRequest(req),
-                channel: req.query.channel
-            })
-        ),
-
-        getTemplate: async (req, res) => sendData(
-            res,
-            await service.getTemplate({
-                advisorId: advisorIdFromRequest(req),
-                templateId: req.params.templateId
-            })
-        )
-    };
+      ),
+  };
 }
-
 export default createCampaignController;
